@@ -1,0 +1,34 @@
+// GD32VW553 BLE Mesh Gen OnOff via klin-lang/gd32v_ble @v0.10.0.
+// mesh_enable after init — provisionable (ADV+GATT). Needs SDK mesh + BLE_MAX.
+//   make emit KLIN=/path/to/klin/bin/klin.dart
+import "../../gd32v_ble" ble
+
+fn main() {
+    let mut e = ble.init()
+    if e != ble.err_ok() {
+        return
+    }
+
+    e = ble.mesh_enable()
+    if e != ble.err_ok() {
+        return
+    }
+    if !ble.mesh_enabled() {
+        return
+    }
+
+    while true {
+        if ble.mesh_provisioned() {
+            let _a = ble.mesh_primary_addr()
+            if ble.mesh_onoff_changed() {
+                let _o = ble.mesh_onoff()
+            }
+        } else {
+            let _oob = ble.mesh_oob_number()
+        }
+        let mut i: i32 = 0
+        while i < 20000000 {
+            i = i + 1
+        }
+    }
+}

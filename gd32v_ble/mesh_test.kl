@@ -1,0 +1,52 @@
+module gd32v_ble
+
+import testing
+
+fn test_mesh_needs_init() {
+    testing.assert_eq_i32(stop(), 0)
+    testing.assert_eq_i32(mesh_enable(), 0 - 1)
+    testing.assert_eq_i32(mesh_onoff_set(1), 0 - 1)
+    testing.assert_eq_i32(mesh_reset(), 0 - 1)
+}
+
+fn test_mesh_enable_onoff_reset() {
+    let mut me: i32
+    let mut mp: i32
+    let mut ch: i32
+
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(mesh_enable(), 0)
+    me = 0
+    if mesh_enabled() {
+        me = 1
+    }
+    testing.assert_eq_i32(me, 1)
+    mp = 0
+    if mesh_provisioned() {
+        mp = 1
+    }
+    testing.assert_eq_i32(mp, 1)
+    testing.assert_eq_i32(mesh_primary_addr(), 2)
+    testing.assert_eq_i32(mesh_onoff_set(1), 0)
+    ch = 0
+    if mesh_onoff_changed() {
+        ch = 1
+    }
+    testing.assert_eq_i32(ch, 1)
+    testing.assert_eq_i32(mesh_onoff(), 1)
+    let _oob = mesh_oob_number()
+    testing.assert_eq_i32(mesh_reset(), 0)
+    mp = 0
+    if mesh_provisioned() {
+        mp = 1
+    }
+    testing.assert_eq_i32(mp, 0)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_mesh_enable_idempotent() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(mesh_enable(), 0)
+    testing.assert_eq_i32(mesh_enable(), 0)
+    testing.assert_eq_i32(stop(), 0)
+}

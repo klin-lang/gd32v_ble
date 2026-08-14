@@ -3,6 +3,7 @@
  * GATTC / security / scan events are SDK contracts (not Klin magic).
  *
  * `@v0.9.0` = … + LE privacy / RPA (`privacy_enable` before advertise/scan).
+ * `@v0.10.0` = … + Mesh Gen OnOff node (`mesh_enable`; needs SDK mesh / BLE_MAX).
  * Peripheral GATT: up to KLIN_GD32V_BLE_GATT_SVC_MAX services (1 chr each),
  * 16-bit or 128-bit UUIDs via gatt_uuid* / gatt_add_* before init.
  * Default single svc 0xFFF0 / chr 0xFFF1 when unset.
@@ -171,6 +172,27 @@ int klin_gd32v_ble_own_addr_type(void);
  * `ble_adp_identity_addr_get` (`.addr`), else public fallback.
  */
 int klin_gd32v_ble_own_addr(unsigned char *out6);
+
+/**
+ * Enable Bluetooth Mesh node (Config + Health + Generic OnOff server).
+ * After `init`. Stops classic advertise if active. Needs SDK mesh headers
+ * (`mesh_cfg.h` + models) and BLE_MAX image (see light_demo). Without mesh
+ * on the include path, returns -1 (not supported).
+ * Unprovisioned: PB-ADV + PB-GATT. Not the same path as `advertise`.
+ */
+int klin_gd32v_ble_mesh_enable(void);
+int klin_gd32v_ble_mesh_enabled(void);
+int klin_gd32v_ble_mesh_provisioned(void);
+/** Primary unicast address, or 0 if unprovisioned. */
+int klin_gd32v_ble_mesh_primary_addr(void);
+int klin_gd32v_ble_mesh_onoff(void);
+int klin_gd32v_ble_mesh_onoff_set(int onoff);
+/** 1 if OnOff changed since last call (clears the flag). */
+int klin_gd32v_ble_mesh_onoff_changed(void);
+/** Last OOB display number from provisioning, or 0. */
+int klin_gd32v_ble_mesh_oob_number(void);
+/** Reset mesh node (leave network); re-enables provisioning bearers. */
+int klin_gd32v_ble_mesh_reset(void);
 
 #ifdef __cplusplus
 }

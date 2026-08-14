@@ -1,7 +1,8 @@
 /* BLE advertise + GATT + central scan + GATT client + bonding + UUID128 +
- * multi-service + LE privacy for Klin on GD32VW553. Real path: GigaDevice VW55x
- * Wi-Fi BLE SDK (AN152 `ble_init` / `app_adv_*` / `ble_gatts_*` / `ble_scan_*` /
- * `ble_conn_*` / `ble_gattc_*` / `app_sec_*` / `ble_adp_privacy_recfg`).
+ * multi-service + LE privacy + Mesh Gen OnOff for Klin on GD32VW553. Real path:
+ * GigaDevice VW55x Wi-Fi BLE SDK (AN152 `ble_init` / `app_adv_*` / `ble_gatts_*` /
+ * `ble_scan_*` / `ble_conn_*` / `ble_gattc_*` / `app_sec_*` /
+ * `ble_adp_privacy_recfg` / `bt_mesh_*`).
  * Host path: stubs when SDK headers are not on the include path.
  *
  * Scan table is fixed (max 16) — no glue malloc. Central / GATT client /
@@ -9,6 +10,8 @@
  * Privacy: controller RPA via `ble_adp_privacy_recfg` + RESOLVABLE own_addr_type
  * for adv/scan/connect. `own_addr` uses public / identity getters (no LOC_ADDR
  * event cache — keep it simple).
+ * Mesh: Zephyr-style GD32 mesh (`mesh_cfg.h` + Gen OnOff); needs BLE_MAX like
+ * light_demo. Without mesh headers, mesh_enable returns -1.
  */
 #include "ble_sdk.h"
 
@@ -40,6 +43,16 @@
 #if __has_include("wrapper_os.h")
 #include "wrapper_os.h"
 #define KLIN_GD32V_BLE_HAVE_OSAL 1
+#endif
+#endif
+#if defined(__has_include)
+#if __has_include("mesh_cfg.h") && __has_include("generic_server.h")
+#include "mesh_cfg.h"
+#include "api/mesh.h"
+#include "mesh_kernel.h"
+#include "generic_server.h"
+#include "model_utils.h"
+#define KLIN_GD32V_BLE_HAVE_MESH 1
 #endif
 #endif
 #endif
@@ -103,6 +116,14 @@ static uint8_t s_passkey_conn_idx;
 static int s_privacy;
 static uint8_t s_own_addr_type;
 
+/* Mesh Gen OnOff (`mesh_enable`). */
+static int s_mesh_on;
+static int s_mesh_inited;
+static uint16_t s_mesh_primary;
+static uint8_t s_mesh_onoff;
+static int s_mesh_onoff_changed;
+static uint32_t s_mesh_oob;
+
 /* Server GATT table (max KLIN_GD32V_BLE_GATT_SVC_MAX). Built before init. */
 static klin_gd32v_ble_gatt_slot_t s_slots[KLIN_GD32V_BLE_GATT_SVC_MAX];
 static int s_slot_count;
@@ -154,6 +175,16 @@ static void klin_gd32v_ble_privacy_reset(void)
     s_privacy = 0;
     /* BLE_GAP_LOCAL_ADDR_STATIC == 0 */
     s_own_addr_type = 0;
+}
+
+static void klin_gd32v_ble_mesh_state_reset(void)
+{
+    s_mesh_on = 0;
+    s_mesh_inited = 0;
+    s_mesh_primary = 0;
+    s_mesh_onoff = 0;
+    s_mesh_onoff_changed = 0;
+    s_mesh_oob = 0;
 }
 
 static void klin_gd32v_ble_slots_ensure_default(void)
@@ -716,6 +747,7 @@ int klin_gd32v_ble_init(void)
     klin_gd32v_ble_bond_link_reset();
     klin_gd32v_ble_passkey_reset();
     klin_gd32v_ble_privacy_reset();
+    klin_gd32v_ble_mesh_state_reset();
     s_bond_enabled = 0;
     klin_gd32v_ble_scan_clear();
     return 0;
@@ -819,6 +851,7 @@ int klin_gd32v_ble_stop(void)
     klin_gd32v_ble_bond_link_reset();
     klin_gd32v_ble_passkey_reset();
     klin_gd32v_ble_privacy_reset();
+    klin_gd32v_ble_mesh_state_reset();
     klin_gd32v_ble_scan_clear();
     ble_deinit();
     return 0;
@@ -1308,6 +1341,240 @@ int klin_gd32v_ble_own_addr(unsigned char *out6)
     return 0;
 }
 
+#if defined(KLIN_GD32V_BLE_HAVE_MESH)
+
+static uint8_t s_mesh_dev_uuid[16];
+static struct bt_mesh_health_srv s_mesh_health_srv;
+BT_MESH_HEALTH_PUB_DEFINE(s_mesh_health_pub, 0);
+BT_MESH_MODEL_PUB_DEFINE(s_mesh_onoff_pub, NULL, 5);
+
+static void klin_gd32v_ble_mesh_onoff_cb(void *user_data,
+                                        enum bt_mesh_srv_callback_evt evt,
+                                        void *state)
+{
+    struct bt_mesh_gen_onoff_state *onoff = state;
+
+    (void)user_data;
+    if (evt != BT_MESH_SRV_GEN_ONOFF_EVT || onoff == NULL) {
+        return;
+    }
+    s_mesh_onoff = onoff->onoff ? 1 : 0;
+    s_mesh_onoff_changed = 1;
+}
+
+static struct bt_mesh_srv_callbacks s_mesh_onoff_cb = {
+    .state_change = klin_gd32v_ble_mesh_onoff_cb,
+};
+
+static struct bt_mesh_gen_onoff_srv s_mesh_onoff_srv = {
+    .cb = &s_mesh_onoff_cb,
+};
+
+static const struct bt_mesh_model s_mesh_root_models[] = {
+    BT_MESH_MODEL_CFG_SRV,
+    BT_MESH_MODEL_HEALTH_SRV(&s_mesh_health_srv, &s_mesh_health_pub),
+    BT_MESH_MODEL_GEN_ONOFF_SRV(&s_mesh_onoff_srv, &s_mesh_onoff_pub),
+};
+
+static const struct bt_mesh_model s_mesh_vnd_models[] = {
+};
+
+static const struct bt_mesh_elem s_mesh_elements[] = {
+    BT_MESH_ELEM(0, s_mesh_root_models, s_mesh_vnd_models),
+};
+
+static const struct bt_mesh_comp s_mesh_comp = {
+    .cid = 0xFFFF,
+    .elem = s_mesh_elements,
+    .elem_count = 1,
+};
+
+static void klin_gd32v_ble_mesh_prov_complete(uint16_t net_idx, uint16_t addr)
+{
+    (void)net_idx;
+    s_mesh_primary = addr;
+}
+
+static int klin_gd32v_ble_mesh_output_number(bt_mesh_output_action_t action,
+                                             uint32_t number)
+{
+    (void)action;
+    s_mesh_oob = number;
+    return 0;
+}
+
+static const struct bt_mesh_prov s_mesh_prov = {
+    .uuid = s_mesh_dev_uuid,
+    .output_size = 6,
+    .output_actions = BT_MESH_DISPLAY_NUMBER,
+    .output_number = klin_gd32v_ble_mesh_output_number,
+    .complete = klin_gd32v_ble_mesh_prov_complete,
+};
+
+int klin_gd32v_ble_mesh_enable(void)
+{
+    int err;
+    unsigned char pub[6];
+
+    if (!s_inited) {
+        return -1;
+    }
+    if (s_mesh_inited) {
+        s_mesh_on = 1;
+        return 0;
+    }
+
+    if (s_advertising) {
+        (void)klin_gd32v_ble_stop_advertise();
+    }
+
+    memset(s_mesh_dev_uuid, 0, sizeof(s_mesh_dev_uuid));
+    if (ble_adp_public_addr_get(pub) == BLE_ERR_NO_ERROR) {
+        memcpy(&s_mesh_dev_uuid[2], pub, 6);
+    }
+
+    mesh_kernel_init();
+    err = bt_mesh_init(&s_mesh_prov, &s_mesh_comp);
+    if (err) {
+        return -1;
+    }
+    s_mesh_inited = 1;
+    s_mesh_on = 1;
+
+    if (bt_mesh_is_provisioned()) {
+        s_mesh_primary = bt_mesh_primary_addr();
+    } else {
+        err = bt_mesh_prov_enable(BT_MESH_PROV_ADV | BT_MESH_PROV_GATT);
+        if (err) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_enabled(void)
+{
+    return s_mesh_on ? 1 : 0;
+}
+
+int klin_gd32v_ble_mesh_provisioned(void)
+{
+    if (!s_mesh_inited) {
+        return 0;
+    }
+    return bt_mesh_is_provisioned() ? 1 : 0;
+}
+
+int klin_gd32v_ble_mesh_primary_addr(void)
+{
+    if (!s_mesh_inited || !bt_mesh_is_provisioned()) {
+        return 0;
+    }
+    if (s_mesh_primary == 0) {
+        s_mesh_primary = bt_mesh_primary_addr();
+    }
+    return (int)s_mesh_primary;
+}
+
+int klin_gd32v_ble_mesh_onoff(void)
+{
+    return (int)s_mesh_onoff;
+}
+
+int klin_gd32v_ble_mesh_onoff_set(int onoff)
+{
+    if (!s_mesh_inited) {
+        return -1;
+    }
+    gen_onoff_config(&s_mesh_onoff_srv, onoff ? 1 : 0);
+    s_mesh_onoff = onoff ? 1 : 0;
+    s_mesh_onoff_changed = 1;
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_onoff_changed(void)
+{
+    int c = s_mesh_onoff_changed;
+    s_mesh_onoff_changed = 0;
+    return c;
+}
+
+int klin_gd32v_ble_mesh_oob_number(void)
+{
+    return (int)s_mesh_oob;
+}
+
+int klin_gd32v_ble_mesh_reset(void)
+{
+    int err;
+
+    if (!s_mesh_inited) {
+        return -1;
+    }
+    bt_mesh_reset();
+    s_mesh_primary = 0;
+    s_mesh_oob = 0;
+    s_mesh_onoff = 0;
+    s_mesh_onoff_changed = 0;
+    err = bt_mesh_prov_enable(BT_MESH_PROV_ADV | BT_MESH_PROV_GATT);
+    if (err) {
+        return -1;
+    }
+    return 0;
+}
+
+#else /* HAVE_SDK but no mesh headers */
+
+int klin_gd32v_ble_mesh_enable(void)
+{
+    (void)s_mesh_on;
+    return -1; /* mesh not in this SDK build */
+}
+
+int klin_gd32v_ble_mesh_enabled(void)
+{
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_provisioned(void)
+{
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_primary_addr(void)
+{
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_onoff(void)
+{
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_onoff_set(int onoff)
+{
+    (void)onoff;
+    return -1;
+}
+
+int klin_gd32v_ble_mesh_onoff_changed(void)
+{
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_oob_number(void)
+{
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_reset(void)
+{
+    return -1;
+}
+
+#endif /* KLIN_GD32V_BLE_HAVE_MESH */
+
+
 #else /* host stubs — no SDK headers */
 
 int klin_gd32v_ble_init(void)
@@ -1324,6 +1591,7 @@ int klin_gd32v_ble_init(void)
     klin_gd32v_ble_bond_link_reset();
     klin_gd32v_ble_passkey_reset();
     klin_gd32v_ble_privacy_reset();
+    klin_gd32v_ble_mesh_state_reset();
     return 0;
 }
 
@@ -1378,6 +1646,7 @@ int klin_gd32v_ble_stop(void)
     klin_gd32v_ble_bond_link_reset();
     klin_gd32v_ble_passkey_reset();
     klin_gd32v_ble_privacy_reset();
+    klin_gd32v_ble_mesh_state_reset();
     return 0;
 }
 
@@ -1662,6 +1931,72 @@ int klin_gd32v_ble_own_addr(unsigned char *out6)
     memcpy(out6, s_privacy ? stub_priv : stub_pub, 6);
     return 0;
 }
+
+int klin_gd32v_ble_mesh_enable(void)
+{
+    if (!s_inited) {
+        return -1;
+    }
+    s_mesh_on = 1;
+    s_mesh_inited = 1;
+    s_mesh_primary = 2;
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_enabled(void)
+{
+    return s_mesh_on ? 1 : 0;
+}
+
+int klin_gd32v_ble_mesh_provisioned(void)
+{
+    return (s_mesh_inited && s_mesh_primary != 0) ? 1 : 0;
+}
+
+int klin_gd32v_ble_mesh_primary_addr(void)
+{
+    return s_mesh_inited ? (int)s_mesh_primary : 0;
+}
+
+int klin_gd32v_ble_mesh_onoff(void)
+{
+    return (int)s_mesh_onoff;
+}
+
+int klin_gd32v_ble_mesh_onoff_set(int onoff)
+{
+    if (!s_mesh_inited) {
+        return -1;
+    }
+    s_mesh_onoff = onoff ? 1 : 0;
+    s_mesh_onoff_changed = 1;
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_onoff_changed(void)
+{
+    int c = s_mesh_onoff_changed;
+    s_mesh_onoff_changed = 0;
+    return c;
+}
+
+int klin_gd32v_ble_mesh_oob_number(void)
+{
+    return (int)s_mesh_oob;
+}
+
+int klin_gd32v_ble_mesh_reset(void)
+{
+    if (!s_mesh_inited) {
+        return -1;
+    }
+    s_mesh_primary = 0;
+    s_mesh_oob = 0;
+    s_mesh_onoff = 0;
+    s_mesh_onoff_changed = 0;
+    return 0;
+}
+
 
 #endif
 

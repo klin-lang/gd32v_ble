@@ -12,6 +12,7 @@
 /// Passkey (`@v0.7.0`): `bond_passkey(pin)` MITM + fixed PIN (replaces Just Works SM).
 /// UUID128 + multi (`@v0.8.0`): `gatt_uuid128` / `gatt_add_*` / `gatt_*_at` / `gattc_select`.
 /// Privacy (`@v0.9.0`): LE privacy / RPA via `privacy_enable` before advertise/scan/connect.
+/// Mesh (`@v0.10.0`): Gen OnOff node via `mesh_enable` (needs SDK mesh / BLE_MAX like light_demo).
 /// Central / GATT client / bonding need an SDK build with those roles (e.g. msdk_ffd).
 module gd32v_ble
 
@@ -201,6 +202,33 @@ fn klin_gd32v_ble_own_addr_type(): i32
 
 @[cimport, codename("klin_gd32v_ble_own_addr")]
 fn klin_gd32v_ble_own_addr(out6: *mut u8): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_enable")]
+fn klin_gd32v_ble_mesh_enable(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_enabled")]
+fn klin_gd32v_ble_mesh_enabled(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_provisioned")]
+fn klin_gd32v_ble_mesh_provisioned(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_primary_addr")]
+fn klin_gd32v_ble_mesh_primary_addr(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_onoff")]
+fn klin_gd32v_ble_mesh_onoff(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_onoff_set")]
+fn klin_gd32v_ble_mesh_onoff_set(onoff: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_onoff_changed")]
+fn klin_gd32v_ble_mesh_onoff_changed(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_oob_number")]
+fn klin_gd32v_ble_mesh_oob_number(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_reset")]
+fn klin_gd32v_ble_mesh_reset(): i32
 
 /// SDK / glue success (0).
 pub fn err_ok(): i32 {
@@ -497,4 +525,41 @@ pub fn own_addr_type(): i32 {
 /// Copy 6-byte own BD_ADDR into `out6`.
 pub fn own_addr(out6: *mut u8): i32 {
     return klin_gd32v_ble_own_addr(out6)
+}
+
+/// Mesh Gen OnOff node. After `init`; not the same path as `advertise`.
+pub fn mesh_enable(): i32 {
+    return klin_gd32v_ble_mesh_enable()
+}
+
+pub fn mesh_enabled(): bool {
+    return klin_gd32v_ble_mesh_enabled() != 0
+}
+
+pub fn mesh_provisioned(): bool {
+    return klin_gd32v_ble_mesh_provisioned() != 0
+}
+
+pub fn mesh_primary_addr(): i32 {
+    return klin_gd32v_ble_mesh_primary_addr()
+}
+
+pub fn mesh_onoff(): i32 {
+    return klin_gd32v_ble_mesh_onoff()
+}
+
+pub fn mesh_onoff_set(onoff: i32): i32 {
+    return klin_gd32v_ble_mesh_onoff_set(onoff)
+}
+
+pub fn mesh_onoff_changed(): bool {
+    return klin_gd32v_ble_mesh_onoff_changed() != 0
+}
+
+pub fn mesh_oob_number(): i32 {
+    return klin_gd32v_ble_mesh_oob_number()
+}
+
+pub fn mesh_reset(): i32 {
+    return klin_gd32v_ble_mesh_reset()
 }
