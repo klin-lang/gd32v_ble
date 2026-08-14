@@ -1,7 +1,8 @@
-/* BLE advertise + GATT + central scan + GATT client + bonding for Klin on
- * GD32VW553. Real path: GigaDevice VW55x Wi-Fi BLE SDK (AN152 `ble_init` /
- * `app_adv_*` / `ble_gatts_*` / `ble_scan_*` / `ble_conn_*` / `ble_gattc_*` /
- * `app_sec_*`). Host path: stubs when SDK headers are not on the include path.
+/* BLE advertise + GATT + central scan + GATT client + bonding + custom UUID16
+ * for Klin on GD32VW553. Real path: GigaDevice VW55x Wi-Fi BLE SDK (AN152
+ * `ble_init` / `app_adv_*` / `ble_gatts_*` / `ble_scan_*` / `ble_conn_*` /
+ * `ble_gattc_*` / `app_sec_*`). Host path: stubs when SDK headers are not on
+ * the include path.
  *
  * Scan table is fixed (max 16) — no glue malloc. Central / GATT client /
  * bonding need an SDK image with those roles (e.g. msdk_ffd).
@@ -74,6 +75,10 @@ static int s_gattc_notified;
 static int s_bond_enabled;
 static int s_bonded;
 
+/* Mutable: set via gatt_uuid16() before init (server DB + gattc discover). */
+static uint16_t s_svc_uuid16 = (uint16_t)KLIN_GD32V_BLE_GATT_SVC_UUID16;
+static uint16_t s_chr_uuid16 = (uint16_t)KLIN_GD32V_BLE_GATT_CHR_UUID16;
+
 static void klin_gd32v_ble_scan_clear(void)
 {
     s_scan_count = 0;
@@ -117,9 +122,9 @@ static int s_scan_cb_reg;
 static int s_conn_cb_reg;
 static int s_gattc_svc_reg;
 
-static const uint8_t s_svc_uuid[2] = UUID_16BIT_TO_ARRAY(KLIN_GD32V_BLE_GATT_SVC_UUID16);
+static uint8_t s_svc_uuid[2] = UUID_16BIT_TO_ARRAY(KLIN_GD32V_BLE_GATT_SVC_UUID16);
 
-static const ble_gatt_attr_desc_t s_gatt_db[KLIN_GATT_IDX_NB] = {
+static ble_gatt_attr_desc_t s_gatt_db[KLIN_GATT_IDX_NB] = {
     [KLIN_GATT_IDX_SVC] = {UUID_16BIT_TO_ARRAY(BLE_GATT_DECL_PRIMARY_SERVICE), PROP(RD), 0},
     [KLIN_GATT_IDX_CHAR] = {UUID_16BIT_TO_ARRAY(BLE_GATT_DECL_CHARACTERISTIC), PROP(RD), 0},
     [KLIN_GATT_IDX_VAL] = {UUID_16BIT_TO_ARRAY(KLIN_GD32V_BLE_GATT_CHR_UUID16),
@@ -128,6 +133,15 @@ static const ble_gatt_attr_desc_t s_gatt_db[KLIN_GATT_IDX_NB] = {
     [KLIN_GATT_IDX_CCCD] = {UUID_16BIT_TO_ARRAY(BLE_GATT_DESC_CLIENT_CHAR_CFG),
                             PROP(RD) | PROP(WR), OPT(NO_OFFSET)},
 };
+
+static void klin_gd32v_ble_apply_uuids(void)
+{
+    s_svc_uuid[0] = (uint8_t)(s_svc_uuid16 & 0xff);
+    s_svc_uuid[1] = (uint8_t)((s_svc_uuid16 >> 8) & 0xff);
+    memset(s_gatt_db[KLIN_GATT_IDX_VAL].uuid, 0, sizeof(s_gatt_db[KLIN_GATT_IDX_VAL].uuid));
+    s_gatt_db[KLIN_GATT_IDX_VAL].uuid[0] = (uint8_t)(s_chr_uuid16 & 0xff);
+    s_gatt_db[KLIN_GATT_IDX_VAL].uuid[1] = (uint8_t)((s_chr_uuid16 >> 8) & 0xff);
+}
 
 static void klin_gd32v_ble_sleep_ms(int ms)
 {
@@ -327,10 +341,10 @@ static int klin_gd32v_ble_gattc_resolve_handles(void)
     memset(&desc, 0, sizeof(desc));
     svc.instance_id = 0;
     svc.ble_uuid.type = BLE_UUID_TYPE_16;
-    svc.ble_uuid.data.uuid_16 = (uint16_t)KLIN_GD32V_BLE_GATT_SVC_UUID16;
+    svc.ble_uuid.data.uuid_16 = s_svc_uuid16;
     chr.instance_id = 0;
     chr.ble_uuid.type = BLE_UUID_TYPE_16;
-    chr.ble_uuid.data.uuid_16 = (uint16_t)KLIN_GD32V_BLE_GATT_CHR_UUID16;
+    chr.ble_uuid.data.uuid_16 = s_chr_uuid16;
 
     handle = 0;
     if (ble_gattc_find_char_handle((uint8_t)s_central_conn_idx, &svc, &chr,
@@ -467,6 +481,7 @@ int klin_gd32v_ble_init(void)
     if (ble_wait_ready() != 0) {
         return -1;
     }
+    klin_gd32v_ble_apply_uuids();
     if (ble_gatts_svc_add(&s_svc_id, s_svc_uuid, 0, SVC_UUID(16), s_gatt_db,
                           KLIN_GATT_IDX_NB, klin_gd32v_ble_gatt_cb) != BLE_ERR_NO_ERROR) {
         ble_deinit();
@@ -475,7 +490,7 @@ int klin_gd32v_ble_init(void)
     s_gatt_added = 1;
     memset(&svc_uuid, 0, sizeof(svc_uuid));
     svc_uuid.type = BLE_UUID_TYPE_16;
-    svc_uuid.data.uuid_16 = (uint16_t)KLIN_GD32V_BLE_GATT_SVC_UUID16;
+    svc_uuid.data.uuid_16 = s_svc_uuid16;
     if (ble_gattc_svc_reg(&svc_uuid, klin_gd32v_ble_gattc_cb) == BLE_ERR_NO_ERROR) {
         s_gattc_svc_reg = 1;
     }
@@ -578,7 +593,7 @@ int klin_gd32v_ble_stop(void)
     if (s_gattc_svc_reg) {
         memset(&svc_uuid, 0, sizeof(svc_uuid));
         svc_uuid.type = BLE_UUID_TYPE_16;
-        svc_uuid.data.uuid_16 = (uint16_t)KLIN_GD32V_BLE_GATT_SVC_UUID16;
+        svc_uuid.data.uuid_16 = s_svc_uuid16;
         (void)ble_gattc_svc_unreg(&svc_uuid);
         s_gattc_svc_reg = 0;
     }
@@ -1150,6 +1165,30 @@ int klin_gd32v_ble_bond_clear(void)
 }
 
 #endif
+
+int klin_gd32v_ble_gatt_uuid16(int svc_uuid16, int chr_uuid16)
+{
+    if (svc_uuid16 <= 0 || svc_uuid16 > 0xFFFF || chr_uuid16 <= 0 ||
+        chr_uuid16 > 0xFFFF) {
+        return -1;
+    }
+    if (s_inited) {
+        return -1;
+    }
+    s_svc_uuid16 = (uint16_t)svc_uuid16;
+    s_chr_uuid16 = (uint16_t)chr_uuid16;
+    return 0;
+}
+
+int klin_gd32v_ble_gatt_svc_uuid16(void)
+{
+    return (int)s_svc_uuid16;
+}
+
+int klin_gd32v_ble_gatt_chr_uuid16(void)
+{
+    return (int)s_chr_uuid16;
+}
 
 int klin_gd32v_ble_gatt_set(const unsigned char *data, int len)
 {

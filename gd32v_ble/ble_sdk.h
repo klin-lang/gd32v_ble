@@ -2,7 +2,7 @@
  * Klin over the GigaDevice VW55x BLE SDK. Heap / OSAL BLE task / GAP / GATTS /
  * GATTC / security / scan events are SDK contracts (not Klin magic).
  *
- * `@v0.5.0` = advertise + GATT MVP + central + GATT client + Just Works bonding.
+ * `@v0.6.0` = … + custom 16-bit GATT UUIDs (`gatt_uuid16` before `init`).
  * Scan results use a fixed table (max 16) — no Klin / glue malloc.
  * Central / GATT client / bonding need an SDK build with those roles (e.g. msdk_ffd).
  */
@@ -13,7 +13,9 @@ extern "C" {
 #endif
 
 #define KLIN_GD32V_BLE_GATT_VALUE_MAX 20
+/** Default primary service UUID16 (override with `klin_gd32v_ble_gatt_uuid16`). */
 #define KLIN_GD32V_BLE_GATT_SVC_UUID16 0xFFF0
+/** Default characteristic UUID16. */
 #define KLIN_GD32V_BLE_GATT_CHR_UUID16 0xFFF1
 
 /** Max scan results kept (deduped by address). Caller-visible contract. */
@@ -21,6 +23,17 @@ extern "C" {
 
 /** Max GAP name bytes stored per scan result (NUL-terminated in C). */
 #define KLIN_GD32V_BLE_SCAN_NAME_MAX 28
+
+/**
+ * Set 16-bit svc/chr UUIDs for the peripheral GATT DB and `gattc_discover`.
+ * Must be called before `init`. Default remains 0xFFF0 / 0xFFF1.
+ * Returns 0 on OK, -1 on bad range or already inited.
+ */
+int klin_gd32v_ble_gatt_uuid16(int svc_uuid16, int chr_uuid16);
+/** Active service UUID16 (default or last `gatt_uuid16`). */
+int klin_gd32v_ble_gatt_svc_uuid16(void);
+/** Active characteristic UUID16. */
+int klin_gd32v_ble_gatt_chr_uuid16(void);
 
 /** `ble_init(true)` + `ble_wait_ready` + GATT svc add + scan/conn/gattc. */
 int klin_gd32v_ble_init(void);
@@ -62,7 +75,7 @@ int klin_gd32v_ble_central_wait_connected(int timeout_ms);
 int klin_gd32v_ble_central_disconnect(void);
 
 /**
- * Discover peer svc 0xFFF0 / chr 0xFFF1 (+ CCCD if present). Blocks.
+ * Discover peer svc/chr from active UUID16 (+ CCCD if present). Blocks.
  * Requires an active central connection. 0 = ready for read/write.
  */
 int klin_gd32v_ble_gattc_discover(int timeout_ms);

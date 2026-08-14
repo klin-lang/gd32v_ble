@@ -3,11 +3,12 @@
 /// `ble_scan_*` / `ble_conn_*` / `ble_gattc_*`, AN152). Not part of `machine_gd32v`.
 /// Not `esp_ble` (ESP-IDF NimBLE).
 ///
-/// GATT MVP (`@v0.2.0`): fixed service `0xFFF0`, char `0xFFF1`
+/// GATT MVP (`@v0.2.0`): default service `0xFFF0`, char `0xFFF1`
 /// (read / write / notify), value buffer max 20 bytes.
 /// Central (`@v0.3.0`): active scan (max 16, dedupe by addr) + connect by index.
-/// GATT client (`@v0.4.0`): discover/read/write/subscribe for 0xFFF0/0xFFF1.
+/// GATT client (`@v0.4.0`): discover/read/write/subscribe for active UUID16.
 /// Bonding (`@v0.5.0`): Just Works pair + SDK flash store (`bond_enable` / `bond_start`).
+/// Custom UUID16 (`@v0.6.0`): `gatt_uuid16` before `init` (default remains 0xFFF0/0xFFF1).
 /// Central / GATT client / bonding need an SDK build with those roles (e.g. msdk_ffd).
 module gd32v_ble
 
@@ -32,6 +33,15 @@ fn klin_gd32v_ble_wait_connected(timeout_ms: i32): i32
 
 @[cimport, codename("klin_gd32v_ble_stop")]
 fn klin_gd32v_ble_stop(): i32
+
+@[cimport, codename("klin_gd32v_ble_gatt_uuid16")]
+fn klin_gd32v_ble_gatt_uuid16(svc_uuid16: i32, chr_uuid16: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_gatt_svc_uuid16")]
+fn klin_gd32v_ble_gatt_svc_uuid16(): i32
+
+@[cimport, codename("klin_gd32v_ble_gatt_chr_uuid16")]
+fn klin_gd32v_ble_gatt_chr_uuid16(): i32
 
 @[cimport, codename("klin_gd32v_ble_gatt_set")]
 fn klin_gd32v_ble_gatt_set(data: *u8, len: i32): i32
@@ -128,14 +138,14 @@ pub fn err_ok(): i32 {
     return 0
 }
 
-/// Primary service UUID (16-bit) — fixed for MVP.
+/// Active primary service UUID (16-bit) — default `0xFFF0` or last `gatt_uuid16`.
 pub fn gatt_svc_uuid16(): i32 {
-    return 0xFFF0
+    return klin_gd32v_ble_gatt_svc_uuid16()
 }
 
-/// Characteristic UUID (16-bit) — fixed for MVP.
+/// Active characteristic UUID (16-bit) — default `0xFFF1` or last `gatt_uuid16`.
 pub fn gatt_chr_uuid16(): i32 {
-    return 0xFFF1
+    return klin_gd32v_ble_gatt_chr_uuid16()
 }
 
 /// Max GATT value length (bytes).
@@ -146,6 +156,11 @@ pub fn gatt_value_max(): i32 {
 /// Max scan results kept (deduped by address).
 pub fn scan_max(): i32 {
     return 16
+}
+
+/// Set 16-bit svc/chr UUIDs. Must run **before** `init` (default `0xFFF0`/`0xFFF1`).
+pub fn gatt_uuid16(svc_uuid16: i32, chr_uuid16: i32): i32 {
+    return klin_gd32v_ble_gatt_uuid16(svc_uuid16, chr_uuid16)
 }
 
 /// `ble_init` + `ble_wait_ready` + GATT svc add (once) + scan/conn callbacks.

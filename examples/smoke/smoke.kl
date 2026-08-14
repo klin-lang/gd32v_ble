@@ -2,8 +2,22 @@
 import "../../gd32v_ble" ble
 
 fn main() {
-    let mut e = ble.init()
+    let mut e = ble.gatt_uuid16(0xA001, 0xA002)
     if e != ble.err_ok() {
+        return
+    }
+    if ble.gatt_svc_uuid16() != 0xA001 {
+        return
+    }
+    if ble.gatt_chr_uuid16() != 0xA002 {
+        return
+    }
+    e = ble.init()
+    if e != ble.err_ok() {
+        return
+    }
+    e = ble.gatt_uuid16(0xB001, 0xB002)
+    if e == ble.err_ok() {
         return
     }
     let mut seed: [1]u8

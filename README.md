@@ -2,13 +2,13 @@
 
 Thin **GigaDevice VW55x BLE** bindings for [Klin](https://github.com/klin-lang/klin)
 (**peripheral advertise** + **GATT server MVP** + **central scan/connect** +
-**GATT client** + **Just Works bonding**).
+**GATT client** + **Just Works bonding** + **custom UUID16**).
 
 The radio is in the **silicon**; this package does **not** belong in
 [`machine_gd32v`](https://github.com/klin-lang/machine_gd32v) (MMIO Pin…Adc).
 Same split as [`esp_ble`](https://github.com/klin-lang/esp_ble) vs `machine_esp`
 — see Klin [106](https://github.com/klin-lang/klin/blob/main/issues/106-esp-ble-idf.md)
-and [130](https://github.com/klin-lang/klin/blob/main/issues/130-gd32v-ble-sdk.md).
+and [140](https://github.com/klin-lang/klin/blob/main/issues/140-gd32v-ble-sdk.md).
 
 C engine = **[GD32VW55x_WiFi_BLE_SDK](https://github.com/GigaDeviceSemiconductor/GD32VW55x_WiFi_BLE_SDK)**
 (`ble_init` / `app_adv_*` / `ble_gatts_*` / `ble_scan_*` / `ble_conn_*` /
@@ -22,19 +22,16 @@ not hidden Klin allocation.
 Wi‑Fi is [`gd32v_wifi`](https://github.com/klin-lang/gd32v_wifi). Do **not**
 put BLE in a board pack.
 
-## Status (`@v0.5.0`)
+## Status (`@v0.6.0`)
 
 | API | Notes |
 |---|---|
-| `init` | `ble_init(true)` + GATT svc + scan/conn + gattc reg (`app_sec_mgr_init` inside SDK `ble_init`) |
-| `advertise` … `gattc_*` | Same as `@v0.4.0` |
-| `bond_enable` | Just Works SM: no IO / no MITM / SC + bond (`app_sec_set_authen`) |
-| `bond_start` | `app_sec_send_bond_req` on active link (central preferred, else peripheral) |
-| `bonded` / `wait_bonded` | Poll / block until pair success |
-| `bond_count` / `bond_clear` | SDK peer flash storage (`ble_peer_all_addr_get` / `ble_peer_data_delete`) |
+| `gatt_uuid16(svc, chr)` | Own **16-bit** UUIDs — call **before** `init` (default remains `0xFFF0` / `0xFFF1`) |
+| `gatt_svc_uuid16` / `gatt_chr_uuid16` | Active values (not hardcoded Klin constants) |
+| `init` … `bond_*` | Same as `@v0.5.0`; GATT DB + `gattc_discover` use the active UUID16 |
 | `err_ok` | 0 |
 
-`version()` → `5`.
+`version()` → `6`.
 
 Host `klin test` uses stubs when `ble_init.h` is not on the include path
 (`__has_include`). Do **not** call the factory-style init on a host and expect
@@ -43,7 +40,8 @@ RF.
 **Central / GATT client / bonding** need a GigaDevice BLE image with those
 roles (e.g. **msdk_ffd**).
 
-Passkey / custom UUID tables later (issue 130).
+`gatt_uuid16` before `init` only; after `init` → `-1`. Passkey / UUID128 later
+(issue 140).
 
 ## Requirements
 
@@ -51,41 +49,30 @@ Passkey / custom UUID tables later (issue 130).
 - Official SDK on the include/link path to build a board ELF
 - AN152 BLE Development Guide (GigaDevice)
 
-## Usage
+## Usage (custom UUID16)
 
 ```klin
 import "github/klin-lang/gd32v_ble" ble
 
 fn main() {
-    let mut e = ble.init()
+    let mut e = ble.gatt_uuid16(0xA001, 0xA002)
     if e != ble.err_ok() {
         return
     }
-    e = ble.bond_enable()
+    e = ble.init()
     if e != ble.err_ok() {
         return
     }
-    e = ble.advertise("klin-bond")
+    e = ble.advertise("klin-uuid")
     if e != ble.err_ok() {
         return
     }
     e = ble.wait_connected(-1)
-    if e != ble.err_ok() {
-        return
-    }
-    e = ble.bond_start()
-    if e != ble.err_ok() {
-        return
-    }
-    e = ble.wait_bonded(60000)
-    if e != ble.err_ok() {
-        return
-    }
 }
 ```
 
 ```sh
-klin get github/klin-lang/gd32v_ble@v0.5.0
+klin get github/klin-lang/gd32v_ble@v0.6.0
 ```
 
 ## Tests
