@@ -1,0 +1,41 @@
+// GD32VW553 BLE Just Works bonding — needs GD32VW55x_WiFi_BLE_SDK.
+// Phone/central: connect to "klin-bond", accept pair (no PIN).
+import "../../gd32v_ble" ble
+
+fn main() {
+    let mut e = ble.init()
+    if e != ble.err_ok() {
+        return
+    }
+
+    e = ble.bond_enable()
+    if e != ble.err_ok() {
+        return
+    }
+
+    e = ble.advertise("klin-bond")
+    if e != ble.err_ok() {
+        return
+    }
+
+    e = ble.wait_connected(120000)
+    if e != ble.err_ok() {
+        return
+    }
+
+    e = ble.bond_start()
+    if e != ble.err_ok() {
+        return
+    }
+    e = ble.wait_bonded(60000)
+    if e != ble.err_ok() {
+        return
+    }
+
+    while ble.connected() != 0 {
+        let mut i: i32 = 0
+        while i < 20000000 {
+            i = i + 1
+        }
+    }
+}

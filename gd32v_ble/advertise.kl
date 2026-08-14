@@ -7,7 +7,8 @@
 /// (read / write / notify), value buffer max 20 bytes.
 /// Central (`@v0.3.0`): active scan (max 16, dedupe by addr) + connect by index.
 /// GATT client (`@v0.4.0`): discover/read/write/subscribe for 0xFFF0/0xFFF1.
-/// Central / GATT client need an SDK build with those roles (e.g. msdk_ffd).
+/// Bonding (`@v0.5.0`): Just Works pair + SDK flash store (`bond_enable` / `bond_start`).
+/// Central / GATT client / bonding need an SDK build with those roles (e.g. msdk_ffd).
 module gd32v_ble
 
 @[link("ble_sdk.c")]
@@ -103,6 +104,24 @@ fn klin_gd32v_ble_gattc_get(out: *mut u8, max_len: i32): i32
 
 @[cimport, codename("klin_gd32v_ble_gattc_len")]
 fn klin_gd32v_ble_gattc_len(): i32
+
+@[cimport, codename("klin_gd32v_ble_bond_enable")]
+fn klin_gd32v_ble_bond_enable(): i32
+
+@[cimport, codename("klin_gd32v_ble_bond_start")]
+fn klin_gd32v_ble_bond_start(): i32
+
+@[cimport, codename("klin_gd32v_ble_bonded")]
+fn klin_gd32v_ble_bonded(): i32
+
+@[cimport, codename("klin_gd32v_ble_wait_bonded")]
+fn klin_gd32v_ble_wait_bonded(timeout_ms: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_bond_count")]
+fn klin_gd32v_ble_bond_count(): i32
+
+@[cimport, codename("klin_gd32v_ble_bond_clear")]
+fn klin_gd32v_ble_bond_clear(): i32
 
 /// SDK / glue success (0).
 pub fn err_ok(): i32 {
@@ -268,4 +287,30 @@ pub fn gattc_get(out: *mut u8, max_len: i32): i32 {
 
 pub fn gattc_len(): i32 {
     return klin_gd32v_ble_gattc_len()
+}
+
+/// Enable Just Works bonding (SM config). Call after `init`, before `bond_start`.
+pub fn bond_enable(): i32 {
+    return klin_gd32v_ble_bond_enable()
+}
+
+/// Start pairing on the active link (central preferred, else peripheral).
+pub fn bond_start(): i32 {
+    return klin_gd32v_ble_bond_start()
+}
+
+pub fn bonded(): bool {
+    return klin_gd32v_ble_bonded() != 0
+}
+
+pub fn wait_bonded(timeout_ms: i32): i32 {
+    return klin_gd32v_ble_wait_bonded(timeout_ms)
+}
+
+pub fn bond_count(): i32 {
+    return klin_gd32v_ble_bond_count()
+}
+
+pub fn bond_clear(): i32 {
+    return klin_gd32v_ble_bond_clear()
 }

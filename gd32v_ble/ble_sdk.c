@@ -1,10 +1,10 @@
-/* BLE advertise + GATT + central scan + GATT client for Klin on GD32VW553.
- * Real path: GigaDevice VW55x Wi-Fi BLE SDK (AN152 `ble_init` / `app_adv_*` /
- * `ble_gatts_*` / `ble_scan_*` / `ble_conn_*` / `ble_gattc_*`). Host path:
- * stubs when SDK headers are not on the include path (klin test).
+/* BLE advertise + GATT + central scan + GATT client + bonding for Klin on
+ * GD32VW553. Real path: GigaDevice VW55x Wi-Fi BLE SDK (AN152 `ble_init` /
+ * `app_adv_*` / `ble_gatts_*` / `ble_scan_*` / `ble_conn_*` / `ble_gattc_*` /
+ * `app_sec_*`). Host path: stubs when SDK headers are not on the include path.
  *
- * Scan table is fixed (max 16) — no glue malloc. Central / GATT client need
- * an SDK image with observer/central + GATT client (e.g. msdk_ffd).
+ * Scan table is fixed (max 16) — no glue malloc. Central / GATT client /
+ * bonding need an SDK image with those roles (e.g. msdk_ffd).
  */
 #include "ble_sdk.h"
 
@@ -21,6 +21,7 @@
 #include "ble_init.h"
 #include "app_adapter_mgr.h"
 #include "app_adv_mgr.h"
+#include "app_sec_mgr.h"
 #include "ble_gatt.h"
 #include "ble_gatts.h"
 #include "ble_gattc.h"
@@ -28,6 +29,8 @@
 #include "ble_conn.h"
 #include "ble_error.h"
 #include "ble_types.h"
+#include "ble_storage.h"
+#include "ble_gap.h"
 #if defined(__has_include)
 #if __has_include("wrapper_os.h")
 #include "wrapper_os.h"
@@ -68,6 +71,9 @@ static unsigned char s_gattc_buf[KLIN_GD32V_BLE_GATT_VALUE_MAX];
 static int s_gattc_buf_len;
 static int s_gattc_notified;
 
+static int s_bond_enabled;
+static int s_bonded;
+
 static void klin_gd32v_ble_scan_clear(void)
 {
     s_scan_count = 0;
@@ -86,6 +92,11 @@ static void klin_gd32v_ble_gattc_reset(void)
     s_gattc_buf_len = 0;
     s_gattc_notified = 0;
     memset(s_gattc_buf, 0, sizeof(s_gattc_buf));
+}
+
+static void klin_gd32v_ble_bond_link_reset(void)
+{
+    s_bonded = 0;
 }
 
 #ifdef KLIN_GD32V_BLE_HAVE_SDK
@@ -238,6 +249,7 @@ static void klin_gd32v_ble_conn_cb(ble_conn_evt_t event, ble_conn_data_u *p_data
             st->info.discon_info.conn_idx == (uint8_t)s_central_conn_idx) {
             s_central_connected = 0;
             klin_gd32v_ble_gattc_reset();
+            klin_gd32v_ble_bond_link_reset();
         }
     }
 }
@@ -380,6 +392,7 @@ static ble_status_t klin_gd32v_ble_gatt_cb(ble_gatts_msg_info_t *info)
         } else if (ind->conn_state == BLE_CONN_STATE_DISCONNECTD) {
             s_connected = 0;
             s_cccd = 0;
+            klin_gd32v_ble_bond_link_reset();
         }
         return BLE_ERR_NO_ERROR;
     }
@@ -475,6 +488,8 @@ int klin_gd32v_ble_init(void)
     s_inited = 1;
     klin_gd32v_ble_gatt_reset();
     klin_gd32v_ble_gattc_reset();
+    klin_gd32v_ble_bond_link_reset();
+    s_bond_enabled = 0;
     klin_gd32v_ble_scan_clear();
     return 0;
 }
@@ -574,8 +589,10 @@ int klin_gd32v_ble_stop(void)
     s_connected = 0;
     s_central_connected = 0;
     s_inited = 0;
+    s_bond_enabled = 0;
     klin_gd32v_ble_gatt_reset();
     klin_gd32v_ble_gattc_reset();
+    klin_gd32v_ble_bond_link_reset();
     klin_gd32v_ble_scan_clear();
     ble_deinit();
     return 0;
@@ -792,6 +809,101 @@ int klin_gd32v_ble_gattc_subscribe(int timeout_ms)
     return s_gattc_op_rc == (int)BLE_ERR_NO_ERROR ? 0 : -1;
 }
 
+static void klin_gd32v_ble_authen_cmpl(uint8_t conn_idx, uint8_t result)
+{
+    (void)conn_idx;
+    if (result == BLE_ERR_NO_ERROR) {
+        s_bonded = 1;
+    } else {
+        s_bonded = 0;
+    }
+}
+
+int klin_gd32v_ble_bond_enable(void)
+{
+    app_sec_callbacks cb;
+
+    if (!s_inited) {
+        return -1;
+    }
+    /* Just Works: no IO / no MITM / SC + bond. Keys stored by SDK storage. */
+    app_sec_set_authen(1, 0, 1, BLE_GAP_IO_CAP_NO_IO, 0, 0, 16);
+    memset(&cb, 0, sizeof(cb));
+    cb.authen_cmpl = klin_gd32v_ble_authen_cmpl;
+    (void)app_sec_callbacks_set(cb);
+    s_bond_enabled = 1;
+    klin_gd32v_ble_bond_link_reset();
+    return 0;
+}
+
+int klin_gd32v_ble_bond_start(void)
+{
+    uint8_t idx;
+
+    if (!s_inited || !s_bond_enabled) {
+        return -1;
+    }
+    if (s_central_connected) {
+        idx = (uint8_t)s_central_conn_idx;
+    } else if (s_connected) {
+        idx = s_conn_idx;
+    } else {
+        return -1;
+    }
+    klin_gd32v_ble_bond_link_reset();
+    app_sec_send_bond_req(idx);
+    return 0;
+}
+
+int klin_gd32v_ble_bonded(void)
+{
+    return s_bonded ? 1 : 0;
+}
+
+int klin_gd32v_ble_wait_bonded(int timeout_ms)
+{
+    if (!s_inited) {
+        return -1;
+    }
+    return klin_gd32v_ble_wait_flag(&s_bonded, timeout_ms);
+}
+
+int klin_gd32v_ble_bond_count(void)
+{
+    uint8_t num;
+    ble_gap_addr_t addrs[BLE_PEER_NUM_MAX];
+
+    if (!s_inited) {
+        return 0;
+    }
+    num = BLE_PEER_NUM_MAX;
+    if (ble_peer_all_addr_get(&num, addrs) != BLE_ERR_NO_ERROR) {
+        return 0;
+    }
+    return (int)num;
+}
+
+int klin_gd32v_ble_bond_clear(void)
+{
+    uint8_t num;
+    uint8_t i;
+    ble_gap_addr_t addrs[BLE_PEER_NUM_MAX];
+
+    if (!s_inited) {
+        return -1;
+    }
+    num = BLE_PEER_NUM_MAX;
+    if (ble_peer_all_addr_get(&num, addrs) != BLE_ERR_NO_ERROR) {
+        klin_gd32v_ble_bond_link_reset();
+        return 0;
+    }
+    for (i = 0; i < num; i++) {
+        (void)ble_peer_data_delete(&addrs[i]);
+    }
+    klin_gd32v_ble_bond_link_reset();
+    return 0;
+}
+
 #else /* host stubs — no SDK headers */
 
 int klin_gd32v_ble_init(void)
@@ -802,9 +914,11 @@ int klin_gd32v_ble_init(void)
     s_scanning = 0;
     s_central_connected = 0;
     s_scan_count = 0;
+    s_bond_enabled = 0;
     memset(s_gatt_value, 0, sizeof(s_gatt_value));
     memset(s_scan, 0, sizeof(s_scan));
     klin_gd32v_ble_gattc_reset();
+    klin_gd32v_ble_bond_link_reset();
     return 0;
 }
 
@@ -851,12 +965,14 @@ int klin_gd32v_ble_stop(void)
     s_scanning = 0;
     s_central_connected = 0;
     s_inited = 0;
+    s_bond_enabled = 0;
     s_gatt_len = 0;
     s_gatt_written = 0;
     s_scan_count = 0;
     memset(s_gatt_value, 0, sizeof(s_gatt_value));
     memset(s_scan, 0, sizeof(s_scan));
     klin_gd32v_ble_gattc_reset();
+    klin_gd32v_ble_bond_link_reset();
     return 0;
 }
 
@@ -977,6 +1093,59 @@ int klin_gd32v_ble_gattc_subscribe(int timeout_ms)
     if (s_gattc_cccd_handle == 0) {
         return -1;
     }
+    return 0;
+}
+
+int klin_gd32v_ble_bond_enable(void)
+{
+    if (!s_inited) {
+        return -1;
+    }
+    s_bond_enabled = 1;
+    klin_gd32v_ble_bond_link_reset();
+    return 0;
+}
+
+int klin_gd32v_ble_bond_start(void)
+{
+    if (!s_inited || !s_bond_enabled) {
+        return -1;
+    }
+    if (!s_central_connected && !s_connected) {
+        return -1;
+    }
+    s_bonded = 1;
+    return 0;
+}
+
+int klin_gd32v_ble_bonded(void)
+{
+    return s_bonded ? 1 : 0;
+}
+
+int klin_gd32v_ble_wait_bonded(int timeout_ms)
+{
+    (void)timeout_ms;
+    if (!s_inited) {
+        return -1;
+    }
+    if (!s_bonded) {
+        return -1;
+    }
+    return 0;
+}
+
+int klin_gd32v_ble_bond_count(void)
+{
+    return s_bonded ? 1 : 0;
+}
+
+int klin_gd32v_ble_bond_clear(void)
+{
+    if (!s_inited) {
+        return -1;
+    }
+    klin_gd32v_ble_bond_link_reset();
     return 0;
 }
 

@@ -1,0 +1,37 @@
+module gd32v_ble
+
+import testing
+
+fn test_host_stub_bond_after_central() {
+    let mut b: i32
+
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(bond_enable(), 0)
+    testing.assert_eq_i32(scan_start(100), 0)
+    testing.assert_eq_i32(central_connect(0, 1000), 0)
+    testing.assert_eq_i32(central_wait_connected(100), 0)
+    testing.assert_eq_i32(bond_start(), 0)
+    testing.assert_eq_i32(wait_bonded(100), 0)
+    b = 0
+    if bonded() {
+        b = 1
+    }
+    testing.assert_eq_i32(b, 1)
+    testing.assert_eq_i32(bond_count(), 1)
+    testing.assert_eq_i32(bond_clear(), 0)
+    b = 0
+    if bonded() {
+        b = 1
+    }
+    testing.assert_eq_i32(b, 0)
+    testing.assert_eq_i32(bond_count(), 0)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_bond_start_needs_enable_and_link() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(bond_start(), 0 - 1)
+    testing.assert_eq_i32(bond_enable(), 0)
+    testing.assert_eq_i32(bond_start(), 0 - 1)
+    testing.assert_eq_i32(stop(), 0)
+}

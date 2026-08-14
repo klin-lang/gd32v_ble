@@ -1,11 +1,10 @@
-/* Thin BLE advertise + GATT + central scan + GATT client helpers for Klin over
- * the GigaDevice VW55x BLE SDK. Heap / OSAL BLE task / GAP / GATTS / GATTC /
- * scan events are SDK contracts (not Klin magic).
+/* Thin BLE advertise + GATT + central scan + GATT client + bonding helpers for
+ * Klin over the GigaDevice VW55x BLE SDK. Heap / OSAL BLE task / GAP / GATTS /
+ * GATTC / security / scan events are SDK contracts (not Klin magic).
  *
- * `@v0.4.0` = advertise + GATT MVP + central scan/connect + GATT client
- * (discover/read/write/subscribe against fixed 0xFFF0/0xFFF1).
+ * `@v0.5.0` = advertise + GATT MVP + central + GATT client + Just Works bonding.
  * Scan results use a fixed table (max 16) — no Klin / glue malloc.
- * Central / GATT client need an SDK build with those roles (e.g. msdk_ffd).
+ * Central / GATT client / bonding need an SDK build with those roles (e.g. msdk_ffd).
  */
 #pragma once
 
@@ -74,6 +73,22 @@ int klin_gd32v_ble_gattc_subscribe(int timeout_ms);
 int klin_gd32v_ble_gattc_notified(void);
 int klin_gd32v_ble_gattc_get(unsigned char *out, int max_len);
 int klin_gd32v_ble_gattc_len(void);
+
+/**
+ * Enable Just Works bonding (SM config via `app_sec_set_authen`). Call after
+ * `init`, before `bond_start`. Keys stored by SDK peer storage (flash).
+ */
+int klin_gd32v_ble_bond_enable(void);
+
+/**
+ * Start pairing on the active link (central preferred, else peripheral).
+ * Requires `bond_enable`. Completes via `app_sec` authen callback.
+ */
+int klin_gd32v_ble_bond_start(void);
+int klin_gd32v_ble_bonded(void);
+int klin_gd32v_ble_wait_bonded(int timeout_ms);
+int klin_gd32v_ble_bond_count(void);
+int klin_gd32v_ble_bond_clear(void);
 
 #ifdef __cplusplus
 }
