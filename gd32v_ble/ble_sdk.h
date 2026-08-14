@@ -4,6 +4,7 @@
  *
  * `@v0.9.0` = … + LE privacy / RPA (`privacy_enable` before advertise/scan).
  * `@v0.10.0` = … + Mesh Gen OnOff node (`mesh_enable`; needs SDK mesh / BLE_MAX).
+ * `@v0.11.0` = … + Mesh provisioner (`mesh_provisioner_enable` + unprov table + prov_adv/gatt).
  * Peripheral GATT: up to KLIN_GD32V_BLE_GATT_SVC_MAX services (1 chr each),
  * 16-bit or 128-bit UUIDs via gatt_uuid* / gatt_add_* before init.
  * Default single svc 0xFFF0 / chr 0xFFF1 when unset.
@@ -29,6 +30,9 @@ extern "C" {
 
 /** Max GAP name bytes stored per scan result (NUL-terminated in C). */
 #define KLIN_GD32V_BLE_SCAN_NAME_MAX 28
+
+/** Max unprovisioned UUIDs kept while acting as Mesh provisioner. */
+#define KLIN_GD32V_BLE_UNPROV_MAX 8
 
 /** Replace slot 0 with 16-bit svc/chr. Before `init`. */
 int klin_gd32v_ble_gatt_uuid16(int svc_uuid16, int chr_uuid16);
@@ -193,6 +197,25 @@ int klin_gd32v_ble_mesh_onoff_changed(void);
 int klin_gd32v_ble_mesh_oob_number(void);
 /** Reset mesh node (leave network); re-enables provisioning bearers. */
 int klin_gd32v_ble_mesh_reset(void);
+
+/**
+ * Enable Mesh provisioner (CDB + self-provision at addr 1). After `init`.
+ * Mutually exclusive with `mesh_enable`. Needs CONFIG_BT_MESH_PROVISIONER + CDB.
+ * Unprov beacons fill a fixed table (max KLIN_GD32V_BLE_UNPROV_MAX).
+ * Auth: auto `bt_mesh_auth_method_set_none` (no interactive OOB).
+ */
+int klin_gd32v_ble_mesh_provisioner_enable(void);
+int klin_gd32v_ble_mesh_provisioner_enabled(void);
+int klin_gd32v_ble_mesh_unprov_count(void);
+int klin_gd32v_ble_mesh_unprov_uuid(int index, unsigned char *out16);
+int klin_gd32v_ble_mesh_unprov_clear(void);
+/** PB-ADV provision table entry. `addr` 0 = auto. Blocks until done/timeout. */
+int klin_gd32v_ble_mesh_prov_adv(int index, int addr, int timeout_ms);
+/** PB-GATT provision table entry. */
+int klin_gd32v_ble_mesh_prov_gatt(int index, int addr, int timeout_ms);
+int klin_gd32v_ble_mesh_cdb_count(void);
+/** Dense index into allocated CDB nodes; returns primary addr or 0. */
+int klin_gd32v_ble_mesh_cdb_addr(int index);
 
 #ifdef __cplusplus
 }

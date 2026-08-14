@@ -13,6 +13,7 @@
 /// UUID128 + multi (`@v0.8.0`): `gatt_uuid128` / `gatt_add_*` / `gatt_*_at` / `gattc_select`.
 /// Privacy (`@v0.9.0`): LE privacy / RPA via `privacy_enable` before advertise/scan/connect.
 /// Mesh (`@v0.10.0`): Gen OnOff node via `mesh_enable` (needs SDK mesh / BLE_MAX like light_demo).
+/// Mesh provisioner (`@v0.11.0`): `mesh_provisioner_enable` + unprov table + `mesh_prov_adv`/`gatt`.
 /// Central / GATT client / bonding need an SDK build with those roles (e.g. msdk_ffd).
 module gd32v_ble
 
@@ -229,6 +230,33 @@ fn klin_gd32v_ble_mesh_oob_number(): i32
 
 @[cimport, codename("klin_gd32v_ble_mesh_reset")]
 fn klin_gd32v_ble_mesh_reset(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_provisioner_enable")]
+fn klin_gd32v_ble_mesh_provisioner_enable(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_provisioner_enabled")]
+fn klin_gd32v_ble_mesh_provisioner_enabled(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_unprov_count")]
+fn klin_gd32v_ble_mesh_unprov_count(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_unprov_uuid")]
+fn klin_gd32v_ble_mesh_unprov_uuid(index: i32, out16: *mut u8): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_unprov_clear")]
+fn klin_gd32v_ble_mesh_unprov_clear(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_prov_adv")]
+fn klin_gd32v_ble_mesh_prov_adv(index: i32, addr: i32, timeout_ms: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_prov_gatt")]
+fn klin_gd32v_ble_mesh_prov_gatt(index: i32, addr: i32, timeout_ms: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_cdb_count")]
+fn klin_gd32v_ble_mesh_cdb_count(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_cdb_addr")]
+fn klin_gd32v_ble_mesh_cdb_addr(index: i32): i32
 
 /// SDK / glue success (0).
 pub fn err_ok(): i32 {
@@ -562,4 +590,49 @@ pub fn mesh_oob_number(): i32 {
 
 pub fn mesh_reset(): i32 {
     return klin_gd32v_ble_mesh_reset()
+}
+
+/// Mesh provisioner role (CDB). After `init`; mutually exclusive with `mesh_enable`.
+pub fn mesh_provisioner_enable(): i32 {
+    return klin_gd32v_ble_mesh_provisioner_enable()
+}
+
+pub fn mesh_provisioner_enabled(): bool {
+    return klin_gd32v_ble_mesh_provisioner_enabled() != 0
+}
+
+pub fn mesh_unprov_count(): i32 {
+    return klin_gd32v_ble_mesh_unprov_count()
+}
+
+/// Copy 16-byte unprovisioned device UUID at `index`.
+pub fn mesh_unprov_uuid(index: i32, out16: *mut u8): i32 {
+    return klin_gd32v_ble_mesh_unprov_uuid(index, out16)
+}
+
+pub fn mesh_unprov_clear(): i32 {
+    return klin_gd32v_ble_mesh_unprov_clear()
+}
+
+/// Provision unprov table entry via PB-ADV. `addr` 0 = auto.
+pub fn mesh_prov_adv(index: i32, addr: i32, timeout_ms: i32): i32 {
+    return klin_gd32v_ble_mesh_prov_adv(index, addr, timeout_ms)
+}
+
+/// Provision via PB-GATT. `addr` 0 = auto.
+pub fn mesh_prov_gatt(index: i32, addr: i32, timeout_ms: i32): i32 {
+    return klin_gd32v_ble_mesh_prov_gatt(index, addr, timeout_ms)
+}
+
+pub fn mesh_cdb_count(): i32 {
+    return klin_gd32v_ble_mesh_cdb_count()
+}
+
+/// CDB node primary address at dense index, or 0.
+pub fn mesh_cdb_addr(index: i32): i32 {
+    return klin_gd32v_ble_mesh_cdb_addr(index)
+}
+
+pub fn mesh_unprov_max(): i32 {
+    return 8
 }

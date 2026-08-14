@@ -12,6 +12,8 @@
  * event cache — keep it simple).
  * Mesh: Zephyr-style GD32 mesh (`mesh_cfg.h` + Gen OnOff); needs BLE_MAX like
  * light_demo. Without mesh headers, mesh_enable returns -1.
+ * Provisioner (`@v0.11.0`): CDB + unprov table + prov_adv/gatt when
+ * CONFIG_BT_MESH_PROVISIONER + CDB; mutually exclusive with mesh_enable.
  */
 #include "ble_sdk.h"
 
@@ -53,6 +55,9 @@
 #include "generic_server.h"
 #include "model_utils.h"
 #define KLIN_GD32V_BLE_HAVE_MESH 1
+#if defined(CONFIG_BT_MESH_PROVISIONER) && (CONFIG_BT_MESH_PROVISIONER)     && defined(CONFIG_BT_MESH_CDB) && (CONFIG_BT_MESH_CDB)
+#define KLIN_GD32V_BLE_HAVE_MESH_PROVISIONER 1
+#endif
 #endif
 #endif
 #endif
@@ -116,13 +121,18 @@ static uint8_t s_passkey_conn_idx;
 static int s_privacy;
 static uint8_t s_own_addr_type;
 
-/* Mesh Gen OnOff (`mesh_enable`). */
+/* Mesh Gen OnOff (`mesh_enable`) / provisioner (`mesh_provisioner_enable`). */
 static int s_mesh_on;
 static int s_mesh_inited;
+static int s_mesh_provisioner;
 static uint16_t s_mesh_primary;
 static uint8_t s_mesh_onoff;
 static int s_mesh_onoff_changed;
 static uint32_t s_mesh_oob;
+static unsigned char s_unprov[KLIN_GD32V_BLE_UNPROV_MAX][16];
+static int s_unprov_count;
+static volatile int s_mesh_node_added;
+static uint16_t s_mesh_last_added_addr;
 
 /* Server GATT table (max KLIN_GD32V_BLE_GATT_SVC_MAX). Built before init. */
 static klin_gd32v_ble_gatt_slot_t s_slots[KLIN_GD32V_BLE_GATT_SVC_MAX];
@@ -181,10 +191,15 @@ static void klin_gd32v_ble_mesh_state_reset(void)
 {
     s_mesh_on = 0;
     s_mesh_inited = 0;
+    s_mesh_provisioner = 0;
     s_mesh_primary = 0;
     s_mesh_onoff = 0;
     s_mesh_onoff_changed = 0;
     s_mesh_oob = 0;
+    s_unprov_count = 0;
+    memset(s_unprov, 0, sizeof(s_unprov));
+    s_mesh_node_added = 0;
+    s_mesh_last_added_addr = 0;
 }
 
 static void klin_gd32v_ble_slots_ensure_default(void)
@@ -1419,6 +1434,9 @@ int klin_gd32v_ble_mesh_enable(void)
     if (!s_inited) {
         return -1;
     }
+    if (s_mesh_provisioner) {
+        return -1;
+    }
     if (s_mesh_inited) {
         s_mesh_on = 1;
         return 0;
@@ -1523,6 +1541,271 @@ int klin_gd32v_ble_mesh_reset(void)
     return 0;
 }
 
+
+#if defined(KLIN_GD32V_BLE_HAVE_MESH_PROVISIONER)
+
+static const uint8_t s_mesh_default_net_key[16] = {
+    0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+    0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+};
+static const uint8_t s_mesh_default_dev_key[16] = {
+    0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+    0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+};
+
+static struct bt_mesh_health_srv s_mesh_prov_health_srv;
+BT_MESH_HEALTH_PUB_DEFINE(s_mesh_prov_health_pub, 0);
+
+static const struct bt_mesh_model s_mesh_prov_root_models[] = {
+    BT_MESH_MODEL_CFG_SRV,
+    BT_MESH_MODEL_HEALTH_SRV(&s_mesh_prov_health_srv, &s_mesh_prov_health_pub),
+};
+
+static const struct bt_mesh_model s_mesh_prov_vnd_models[] = {
+};
+
+static const struct bt_mesh_elem s_mesh_prov_elements[] = {
+    BT_MESH_ELEM(0, s_mesh_prov_root_models, s_mesh_prov_vnd_models),
+};
+
+static const struct bt_mesh_comp s_mesh_prov_comp = {
+    .cid = 0xFFFF,
+    .elem = s_mesh_prov_elements,
+    .elem_count = 1,
+};
+
+static void klin_gd32v_ble_unprov_add(uint8_t uuid[16])
+{
+    int i;
+
+    if (uuid == NULL) {
+        return;
+    }
+    for (i = 0; i < s_unprov_count; i++) {
+        if (memcmp(s_unprov[i], uuid, 16) == 0) {
+            return;
+        }
+    }
+    if (s_unprov_count >= KLIN_GD32V_BLE_UNPROV_MAX) {
+        return;
+    }
+    memcpy(s_unprov[s_unprov_count], uuid, 16);
+    s_unprov_count++;
+}
+
+static void klin_gd32v_ble_unprov_beacon(uint8_t uuid[16], bt_mesh_prov_oob_info_t oob_info,
+                                         uint32_t *uri_hash)
+{
+    (void)oob_info;
+    (void)uri_hash;
+    klin_gd32v_ble_unprov_add(uuid);
+}
+
+static void klin_gd32v_ble_unprov_beacon_gatt(uint8_t uuid[16],
+                                              bt_mesh_prov_oob_info_t oob_info)
+{
+    (void)oob_info;
+    klin_gd32v_ble_unprov_add(uuid);
+}
+
+static void klin_gd32v_ble_mesh_node_added(uint16_t net_idx, uint8_t uuid[16], uint16_t addr,
+                                           uint8_t num_elem)
+{
+    (void)net_idx;
+    (void)uuid;
+    (void)num_elem;
+    s_mesh_last_added_addr = addr;
+    s_mesh_node_added = 1;
+}
+
+static void klin_gd32v_ble_mesh_prov_caps(const struct bt_mesh_dev_capabilities *cap)
+{
+    (void)cap;
+    (void)bt_mesh_auth_method_set_none();
+}
+
+static const struct bt_mesh_prov s_mesh_provisioner_prov = {
+    .uuid = s_mesh_dev_uuid,
+    .complete = klin_gd32v_ble_mesh_prov_complete,
+    .unprovisioned_beacon = klin_gd32v_ble_unprov_beacon,
+    .unprovisioned_beacon_gatt = klin_gd32v_ble_unprov_beacon_gatt,
+    .node_added = klin_gd32v_ble_mesh_node_added,
+    .capabilities = klin_gd32v_ble_mesh_prov_caps,
+};
+
+int klin_gd32v_ble_mesh_provisioner_enable(void)
+{
+    int err;
+    unsigned char pub[6];
+
+    if (!s_inited) {
+        return -1;
+    }
+    if (s_mesh_inited && !s_mesh_provisioner) {
+        return -1;
+    }
+    if (s_mesh_provisioner) {
+        return 0;
+    }
+
+    if (s_advertising) {
+        (void)klin_gd32v_ble_stop_advertise();
+    }
+
+    memset(s_mesh_dev_uuid, 0, sizeof(s_mesh_dev_uuid));
+    if (ble_adp_public_addr_get(pub) == BLE_ERR_NO_ERROR) {
+        memcpy(&s_mesh_dev_uuid[2], pub, 6);
+    }
+
+    s_unprov_count = 0;
+    memset(s_unprov, 0, sizeof(s_unprov));
+    s_mesh_node_added = 0;
+
+    mesh_kernel_init();
+    err = bt_mesh_init(&s_mesh_provisioner_prov, &s_mesh_prov_comp);
+    if (err) {
+        return -1;
+    }
+
+    err = bt_mesh_cdb_create(s_mesh_default_net_key);
+    if (err) {
+        return -1;
+    }
+    err = bt_mesh_provision(s_mesh_default_net_key, 0, 0, 0, 1, s_mesh_default_dev_key);
+    if (err) {
+        return -1;
+    }
+
+    s_mesh_inited = 1;
+    s_mesh_provisioner = 1;
+    s_mesh_on = 0;
+    s_mesh_primary = 1;
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_provisioner_enabled(void)
+{
+    return s_mesh_provisioner ? 1 : 0;
+}
+
+int klin_gd32v_ble_mesh_unprov_count(void)
+{
+    return s_unprov_count;
+}
+
+int klin_gd32v_ble_mesh_unprov_uuid(int index, unsigned char *out16)
+{
+    if (out16 == NULL || index < 0 || index >= s_unprov_count) {
+        return -1;
+    }
+    memcpy(out16, s_unprov[index], 16);
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_unprov_clear(void)
+{
+    s_unprov_count = 0;
+    memset(s_unprov, 0, sizeof(s_unprov));
+    return 0;
+}
+
+static int klin_gd32v_ble_mesh_prov_do(int index, int addr, int timeout_ms, int gatt)
+{
+    int err;
+    uint16_t uaddr;
+
+    if (!s_mesh_provisioner) {
+        return -1;
+    }
+    if (index < 0 || index >= s_unprov_count) {
+        return -1;
+    }
+    uaddr = (addr <= 0 || addr > 0x7FFF) ? 0 : (uint16_t)addr;
+    s_mesh_node_added = 0;
+    if (gatt) {
+        err = bt_mesh_provision_gatt(s_unprov[index], 0, uaddr, 0);
+    } else {
+        err = bt_mesh_provision_adv(s_unprov[index], 0, uaddr, 0);
+    }
+    if (err) {
+        return -1;
+    }
+    if (klin_gd32v_ble_wait_flag(&s_mesh_node_added, timeout_ms) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_prov_adv(int index, int addr, int timeout_ms)
+{
+    return klin_gd32v_ble_mesh_prov_do(index, addr, timeout_ms, 0);
+}
+
+int klin_gd32v_ble_mesh_prov_gatt(int index, int addr, int timeout_ms)
+{
+    return klin_gd32v_ble_mesh_prov_do(index, addr, timeout_ms, 1);
+}
+
+int klin_gd32v_ble_mesh_cdb_count(void)
+{
+    int i;
+    int n;
+    int maxn;
+
+    if (!s_mesh_provisioner) {
+        return 0;
+    }
+    n = 0;
+    maxn = CONFIG_BT_MESH_CDB_NODE_COUNT;
+    for (i = 0; i < maxn; i++) {
+        if (bt_mesh_cdb.nodes[i].addr != BT_MESH_ADDR_UNASSIGNED) {
+            n++;
+        }
+    }
+    return n;
+}
+
+int klin_gd32v_ble_mesh_cdb_addr(int index)
+{
+    int i;
+    int seen;
+    int maxn;
+
+    if (!s_mesh_provisioner || index < 0) {
+        return 0;
+    }
+    seen = 0;
+    maxn = CONFIG_BT_MESH_CDB_NODE_COUNT;
+    for (i = 0; i < maxn; i++) {
+        if (bt_mesh_cdb.nodes[i].addr == BT_MESH_ADDR_UNASSIGNED) {
+            continue;
+        }
+        if (seen == index) {
+            return (int)bt_mesh_cdb.nodes[i].addr;
+        }
+        seen++;
+    }
+    return 0;
+}
+
+#else /* HAVE_MESH but no provisioner/CDB */
+
+int klin_gd32v_ble_mesh_provisioner_enable(void) { return -1; }
+int klin_gd32v_ble_mesh_provisioner_enabled(void) { return 0; }
+int klin_gd32v_ble_mesh_unprov_count(void) { return 0; }
+int klin_gd32v_ble_mesh_unprov_uuid(int index, unsigned char *out16)
+{ (void)index; (void)out16; return -1; }
+int klin_gd32v_ble_mesh_unprov_clear(void) { return 0; }
+int klin_gd32v_ble_mesh_prov_adv(int index, int addr, int timeout_ms)
+{ (void)index; (void)addr; (void)timeout_ms; return -1; }
+int klin_gd32v_ble_mesh_prov_gatt(int index, int addr, int timeout_ms)
+{ (void)index; (void)addr; (void)timeout_ms; return -1; }
+int klin_gd32v_ble_mesh_cdb_count(void) { return 0; }
+int klin_gd32v_ble_mesh_cdb_addr(int index) { (void)index; return 0; }
+
+#endif /* KLIN_GD32V_BLE_HAVE_MESH_PROVISIONER */
+
+
 #else /* HAVE_SDK but no mesh headers */
 
 int klin_gd32v_ble_mesh_enable(void)
@@ -1574,6 +1857,20 @@ int klin_gd32v_ble_mesh_reset(void)
 
 #endif /* KLIN_GD32V_BLE_HAVE_MESH */
 
+
+
+int klin_gd32v_ble_mesh_provisioner_enable(void) { return -1; }
+int klin_gd32v_ble_mesh_provisioner_enabled(void) { return 0; }
+int klin_gd32v_ble_mesh_unprov_count(void) { return 0; }
+int klin_gd32v_ble_mesh_unprov_uuid(int index, unsigned char *out16)
+{ (void)index; (void)out16; return -1; }
+int klin_gd32v_ble_mesh_unprov_clear(void) { return 0; }
+int klin_gd32v_ble_mesh_prov_adv(int index, int addr, int timeout_ms)
+{ (void)index; (void)addr; (void)timeout_ms; return -1; }
+int klin_gd32v_ble_mesh_prov_gatt(int index, int addr, int timeout_ms)
+{ (void)index; (void)addr; (void)timeout_ms; return -1; }
+int klin_gd32v_ble_mesh_cdb_count(void) { return 0; }
+int klin_gd32v_ble_mesh_cdb_addr(int index) { (void)index; return 0; }
 
 #else /* host stubs — no SDK headers */
 
@@ -1937,6 +2234,9 @@ int klin_gd32v_ble_mesh_enable(void)
     if (!s_inited) {
         return -1;
     }
+    if (s_mesh_provisioner) {
+        return -1;
+    }
     s_mesh_on = 1;
     s_mesh_inited = 1;
     s_mesh_primary = 2;
@@ -1996,6 +2296,97 @@ int klin_gd32v_ble_mesh_reset(void)
     s_mesh_onoff_changed = 0;
     return 0;
 }
+
+
+int klin_gd32v_ble_mesh_provisioner_enable(void)
+{
+    static const unsigned char seed_uuid[16] = {
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16
+    };
+
+    if (!s_inited) {
+        return -1;
+    }
+    if (s_mesh_inited && !s_mesh_provisioner) {
+        return -1;
+    }
+    if (s_mesh_provisioner) {
+        return 0;
+    }
+    s_mesh_inited = 1;
+    s_mesh_provisioner = 1;
+    s_mesh_on = 0;
+    s_mesh_primary = 1;
+    s_unprov_count = 1;
+    memcpy(s_unprov[0], seed_uuid, 16);
+    s_mesh_node_added = 0;
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_provisioner_enabled(void)
+{
+    return s_mesh_provisioner ? 1 : 0;
+}
+
+int klin_gd32v_ble_mesh_unprov_count(void)
+{
+    return s_unprov_count;
+}
+
+int klin_gd32v_ble_mesh_unprov_uuid(int index, unsigned char *out16)
+{
+    if (out16 == NULL || index < 0 || index >= s_unprov_count) {
+        return -1;
+    }
+    memcpy(out16, s_unprov[index], 16);
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_unprov_clear(void)
+{
+    s_unprov_count = 0;
+    memset(s_unprov, 0, sizeof(s_unprov));
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_prov_adv(int index, int addr, int timeout_ms)
+{
+    (void)timeout_ms;
+    if (!s_mesh_provisioner || index < 0 || index >= s_unprov_count) {
+        return -1;
+    }
+    s_mesh_last_added_addr = (addr > 0) ? (uint16_t)addr : 2;
+    s_mesh_node_added = 1;
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_prov_gatt(int index, int addr, int timeout_ms)
+{
+    return klin_gd32v_ble_mesh_prov_adv(index, addr, timeout_ms);
+}
+
+int klin_gd32v_ble_mesh_cdb_count(void)
+{
+    if (!s_mesh_provisioner) {
+        return 0;
+    }
+    return s_mesh_node_added ? 2 : 1;
+}
+
+int klin_gd32v_ble_mesh_cdb_addr(int index)
+{
+    if (!s_mesh_provisioner || index < 0) {
+        return 0;
+    }
+    if (index == 0) {
+        return 1;
+    }
+    if (index == 1 && s_mesh_node_added) {
+        return (int)s_mesh_last_added_addr;
+    }
+    return 0;
+}
+
 
 
 #endif

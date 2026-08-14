@@ -221,7 +221,35 @@ fn main() {
     }
     let _oob = ble.mesh_oob_number()
     let _mr = ble.mesh_reset()
-    if ble.version() != 10 {
+    let _st = ble.stop()
+    e = ble.init()
+    if e != ble.err_ok() {
+        return
+    }
+    e = ble.mesh_provisioner_enable()
+    if e != ble.err_ok() {
+        return
+    }
+    if !ble.mesh_provisioner_enabled() {
+        return
+    }
+    if ble.mesh_enable() == ble.err_ok() {
+        return
+    }
+    if ble.mesh_cdb_count() < 1 {
+        return
+    }
+    if ble.mesh_unprov_count() < 1 {
+        return
+    }
+    e = ble.mesh_prov_adv(0, 2, 100)
+    if e != ble.err_ok() {
+        return
+    }
+    if ble.mesh_cdb_count() < 2 {
+        return
+    }
+    if ble.version() != 11 {
         return
     }
     let _s = ble.stop()

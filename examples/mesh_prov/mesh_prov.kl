@@ -1,0 +1,35 @@
+// GD32VW553 BLE Mesh provisioner via klin-lang/gd32v_ble @v0.11.0.
+// mesh_provisioner_enable after init; provision first unprov beacon via PB-ADV.
+// Needs SDK mesh + BLE_MAX + CONFIG_BT_MESH_PROVISIONER/CDB.
+//   make emit KLIN=/path/to/klin/bin/klin.dart
+import "../../gd32v_ble" ble
+
+fn main() {
+    let mut e = ble.init()
+    if e != ble.err_ok() {
+        return
+    }
+
+    e = ble.mesh_provisioner_enable()
+    if e != ble.err_ok() {
+        return
+    }
+    if !ble.mesh_provisioner_enabled() {
+        return
+    }
+
+    while true {
+        if ble.mesh_unprov_count() > 0 {
+            e = ble.mesh_prov_adv(0, 2, 60000)
+            if e == ble.err_ok() {
+                let _n = ble.mesh_cdb_count()
+                let _a = ble.mesh_cdb_addr(1)
+            }
+            let _c = ble.mesh_unprov_clear()
+        }
+        let mut i: i32 = 0
+        while i < 20000000 {
+            i = i + 1
+        }
+    }
+}

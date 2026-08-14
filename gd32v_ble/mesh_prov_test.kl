@@ -1,0 +1,48 @@
+module gd32v_ble
+
+import testing
+
+fn test_provisioner_needs_init() {
+    testing.assert_eq_i32(stop(), 0)
+    testing.assert_eq_i32(mesh_provisioner_enable(), 0 - 1)
+}
+
+fn test_provisioner_enable_cdb() {
+    let mut pe: i32
+
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(mesh_provisioner_enable(), 0)
+    pe = 0
+    if mesh_provisioner_enabled() {
+        pe = 1
+    }
+    testing.assert_eq_i32(pe, 1)
+    testing.assert_eq_i32(mesh_enable(), 0 - 1)
+    testing.assert(mesh_cdb_count() >= 1)
+    testing.assert(mesh_cdb_addr(0) != 0)
+    testing.assert_eq_i32(mesh_unprov_clear(), 0)
+    testing.assert_eq_i32(mesh_unprov_count(), 0)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_provisioner_vs_node_mutex() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(mesh_enable(), 0)
+    testing.assert_eq_i32(mesh_provisioner_enable(), 0 - 1)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_prov_adv_index_bounds() {
+    let mut n: i32
+
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(mesh_provisioner_enable(), 0)
+    testing.assert_eq_i32(mesh_prov_adv(0 - 1, 2, 100), 0 - 1)
+    testing.assert_eq_i32(mesh_prov_gatt(99, 2, 100), 0 - 1)
+    // Stub seeds one unprov UUID — provision it.
+    n = mesh_unprov_count()
+    testing.assert(n >= 1)
+    testing.assert_eq_i32(mesh_prov_adv(0, 2, 100), 0)
+    testing.assert(mesh_cdb_count() >= 2)
+    testing.assert_eq_i32(stop(), 0)
+}
