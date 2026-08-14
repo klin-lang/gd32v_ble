@@ -1,14 +1,15 @@
-/* BLE advertise + GATT + central scan for Klin on GD32VW553.
+/* BLE advertise + GATT + central scan + GATT client for Klin on GD32VW553.
  * Real path: GigaDevice VW55x Wi-Fi BLE SDK (AN152 `ble_init` / `app_adv_*` /
- * `ble_gatts_*` / `ble_scan_*` / `ble_conn_*`). Host path: stubs when SDK
- * headers are not on the include path (klin test).
+ * `ble_gatts_*` / `ble_scan_*` / `ble_conn_*` / `ble_gattc_*`). Host path:
+ * stubs when SDK headers are not on the include path (klin test).
  *
- * Scan table is fixed (max 16) — no glue malloc. Central needs an SDK image
- * with observer/central roles (e.g. msdk_ffd).
+ * Scan table is fixed (max 16) — no glue malloc. Central / GATT client need
+ * an SDK image with observer/central + GATT client (e.g. msdk_ffd).
  */
 #include "ble_sdk.h"
 
 #include <string.h>
+#include <stdint.h>
 
 #if defined(__has_include)
 #if __has_include("ble_init.h")
@@ -22,9 +23,11 @@
 #include "app_adv_mgr.h"
 #include "ble_gatt.h"
 #include "ble_gatts.h"
+#include "ble_gattc.h"
 #include "ble_scan.h"
 #include "ble_conn.h"
 #include "ble_error.h"
+#include "ble_types.h"
 #if defined(__has_include)
 #if __has_include("wrapper_os.h")
 #include "wrapper_os.h"
@@ -54,10 +57,35 @@ static int s_gatt_written;
 static klin_gd32v_ble_scan_row_t s_scan[KLIN_GD32V_BLE_SCAN_MAX];
 static int s_scan_count;
 
+static uint16_t s_gattc_val_handle;
+static uint16_t s_gattc_cccd_handle;
+static int s_gattc_ready;
+static int s_gattc_op_done;
+static int s_gattc_op_rc;
+static int s_gattc_disc_done;
+static int s_gattc_svc_found;
+static unsigned char s_gattc_buf[KLIN_GD32V_BLE_GATT_VALUE_MAX];
+static int s_gattc_buf_len;
+static int s_gattc_notified;
+
 static void klin_gd32v_ble_scan_clear(void)
 {
     s_scan_count = 0;
     memset(s_scan, 0, sizeof(s_scan));
+}
+
+static void klin_gd32v_ble_gattc_reset(void)
+{
+    s_gattc_val_handle = 0;
+    s_gattc_cccd_handle = 0;
+    s_gattc_ready = 0;
+    s_gattc_op_done = 0;
+    s_gattc_op_rc = 0;
+    s_gattc_disc_done = 0;
+    s_gattc_svc_found = 0;
+    s_gattc_buf_len = 0;
+    s_gattc_notified = 0;
+    memset(s_gattc_buf, 0, sizeof(s_gattc_buf));
 }
 
 #ifdef KLIN_GD32V_BLE_HAVE_SDK
@@ -76,6 +104,7 @@ static uint16_t s_cccd;
 static int s_gatt_added;
 static int s_scan_cb_reg;
 static int s_conn_cb_reg;
+static int s_gattc_svc_reg;
 
 static const uint8_t s_svc_uuid[2] = UUID_16BIT_TO_ARRAY(KLIN_GD32V_BLE_GATT_SVC_UUID16);
 
@@ -208,7 +237,124 @@ static void klin_gd32v_ble_conn_cb(ble_conn_evt_t event, ble_conn_data_u *p_data
         if (s_central_connected &&
             st->info.discon_info.conn_idx == (uint8_t)s_central_conn_idx) {
             s_central_connected = 0;
+            klin_gd32v_ble_gattc_reset();
         }
+    }
+}
+
+static void klin_gd32v_ble_gattc_disc_done(uint8_t conn_idx, uint16_t status)
+{
+    (void)conn_idx;
+    s_gattc_op_rc = (int)status;
+    s_gattc_disc_done = 1;
+}
+
+static ble_status_t klin_gd32v_ble_gattc_cb(ble_gattc_msg_info_t *info)
+{
+    ble_gattc_op_info_t *op;
+    ble_gattc_read_rsp_t *rd;
+    ble_gattc_write_rsp_t *wr;
+    ble_gattc_ntf_ind_t *ntf;
+    int n;
+
+    if (info == NULL) {
+        return BLE_ERR_NO_ERROR;
+    }
+    if (info->cli_msg_type != BLE_CLI_EVT_GATT_OPERATION) {
+        return BLE_ERR_NO_ERROR;
+    }
+    op = &info->msg_data.gattc_op_info;
+    if (op->gattc_op_sub_evt == BLE_CLI_EVT_SVC_DISC_DONE_RSP) {
+        s_gattc_svc_found = op->gattc_op_data.svc_dis_done_ind.is_found ? 1 : 0;
+    } else if (op->gattc_op_sub_evt == BLE_CLI_EVT_READ_RSP) {
+        rd = &op->gattc_op_data.read_rsp;
+        s_gattc_op_rc = (int)rd->status;
+        if (rd->status == BLE_ERR_NO_ERROR && rd->p_value != NULL) {
+            n = (int)rd->length;
+            if (n > KLIN_GD32V_BLE_GATT_VALUE_MAX) {
+                n = KLIN_GD32V_BLE_GATT_VALUE_MAX;
+            }
+            if (n > 0) {
+                memcpy(s_gattc_buf, rd->p_value, (size_t)n);
+            }
+            s_gattc_buf_len = n;
+        } else {
+            s_gattc_buf_len = 0;
+        }
+        s_gattc_op_done = 1;
+    } else if (op->gattc_op_sub_evt == BLE_CLI_EVT_WRITE_RSP) {
+        wr = &op->gattc_op_data.write_rsp;
+        s_gattc_op_rc = (int)wr->status;
+        s_gattc_op_done = 1;
+    } else if (op->gattc_op_sub_evt == BLE_CLI_EVT_NTF_IND_RCV) {
+        ntf = &op->gattc_op_data.ntf_ind;
+        if (ntf->p_value != NULL) {
+            n = (int)ntf->length;
+            if (n > KLIN_GD32V_BLE_GATT_VALUE_MAX) {
+                n = KLIN_GD32V_BLE_GATT_VALUE_MAX;
+            }
+            if (n > 0) {
+                memcpy(s_gattc_buf, ntf->p_value, (size_t)n);
+            }
+            s_gattc_buf_len = n;
+            s_gattc_notified = 1;
+        }
+    }
+    return BLE_ERR_NO_ERROR;
+}
+
+static int klin_gd32v_ble_gattc_resolve_handles(void)
+{
+    ble_gattc_uuid_info_t svc;
+    ble_gattc_uuid_info_t chr;
+    ble_gattc_uuid_info_t desc;
+    uint16_t handle;
+
+    memset(&svc, 0, sizeof(svc));
+    memset(&chr, 0, sizeof(chr));
+    memset(&desc, 0, sizeof(desc));
+    svc.instance_id = 0;
+    svc.ble_uuid.type = BLE_UUID_TYPE_16;
+    svc.ble_uuid.data.uuid_16 = (uint16_t)KLIN_GD32V_BLE_GATT_SVC_UUID16;
+    chr.instance_id = 0;
+    chr.ble_uuid.type = BLE_UUID_TYPE_16;
+    chr.ble_uuid.data.uuid_16 = (uint16_t)KLIN_GD32V_BLE_GATT_CHR_UUID16;
+
+    handle = 0;
+    if (ble_gattc_find_char_handle((uint8_t)s_central_conn_idx, &svc, &chr,
+                                   &handle) != BLE_ERR_NO_ERROR ||
+        handle == 0) {
+        return -1;
+    }
+    s_gattc_val_handle = handle;
+
+    desc.instance_id = 0;
+    desc.ble_uuid.type = BLE_UUID_TYPE_16;
+    desc.ble_uuid.data.uuid_16 = BLE_GATT_DESC_CLIENT_CHAR_CFG;
+    handle = 0;
+    if (ble_gattc_find_desc_handle((uint8_t)s_central_conn_idx, &svc, &chr,
+                                   &desc, &handle) == BLE_ERR_NO_ERROR) {
+        s_gattc_cccd_handle = handle;
+    } else {
+        s_gattc_cccd_handle = 0;
+    }
+    return 0;
+}
+
+static int klin_gd32v_ble_wait_flag(volatile int *flag, int timeout_ms)
+{
+    int waited;
+
+    waited = 0;
+    while (1) {
+        if (*flag) {
+            return 0;
+        }
+        if (timeout_ms >= 0 && waited >= timeout_ms) {
+            return -1;
+        }
+        klin_gd32v_ble_sleep_ms(1);
+        waited = waited + 1;
     }
 }
 
@@ -299,6 +445,8 @@ static void klin_gd32v_ble_gatt_reset(void)
 
 int klin_gd32v_ble_init(void)
 {
+    ble_uuid_t svc_uuid;
+
     if (s_inited) {
         return 0;
     }
@@ -312,6 +460,12 @@ int klin_gd32v_ble_init(void)
         return -1;
     }
     s_gatt_added = 1;
+    memset(&svc_uuid, 0, sizeof(svc_uuid));
+    svc_uuid.type = BLE_UUID_TYPE_16;
+    svc_uuid.data.uuid_16 = (uint16_t)KLIN_GD32V_BLE_GATT_SVC_UUID16;
+    if (ble_gattc_svc_reg(&svc_uuid, klin_gd32v_ble_gattc_cb) == BLE_ERR_NO_ERROR) {
+        s_gattc_svc_reg = 1;
+    }
     if (ble_scan_callback_register(klin_gd32v_ble_scan_cb) == BLE_ERR_NO_ERROR) {
         s_scan_cb_reg = 1;
     }
@@ -320,6 +474,7 @@ int klin_gd32v_ble_init(void)
     }
     s_inited = 1;
     klin_gd32v_ble_gatt_reset();
+    klin_gd32v_ble_gattc_reset();
     klin_gd32v_ble_scan_clear();
     return 0;
 }
@@ -392,6 +547,8 @@ int klin_gd32v_ble_wait_connected(int timeout_ms)
 
 int klin_gd32v_ble_stop(void)
 {
+    ble_uuid_t svc_uuid;
+
     (void)klin_gd32v_ble_scan_stop();
     (void)klin_gd32v_ble_central_disconnect();
     (void)klin_gd32v_ble_stop_advertise();
@@ -403,6 +560,13 @@ int klin_gd32v_ble_stop(void)
         (void)ble_conn_callback_unregister(klin_gd32v_ble_conn_cb);
         s_conn_cb_reg = 0;
     }
+    if (s_gattc_svc_reg) {
+        memset(&svc_uuid, 0, sizeof(svc_uuid));
+        svc_uuid.type = BLE_UUID_TYPE_16;
+        svc_uuid.data.uuid_16 = (uint16_t)KLIN_GD32V_BLE_GATT_SVC_UUID16;
+        (void)ble_gattc_svc_unreg(&svc_uuid);
+        s_gattc_svc_reg = 0;
+    }
     if (s_gatt_added) {
         (void)ble_gatts_svc_rmv(s_svc_id);
         s_gatt_added = 0;
@@ -411,6 +575,7 @@ int klin_gd32v_ble_stop(void)
     s_central_connected = 0;
     s_inited = 0;
     klin_gd32v_ble_gatt_reset();
+    klin_gd32v_ble_gattc_reset();
     klin_gd32v_ble_scan_clear();
     ble_deinit();
     return 0;
@@ -528,7 +693,103 @@ int klin_gd32v_ble_central_disconnect(void)
     (void)ble_conn_disconnect((uint8_t)s_central_conn_idx,
                               BLE_ERROR_HL_TO_HCI(BLE_LL_ERR_REMOTE_USER_TERM_CON));
     s_central_connected = 0;
+    klin_gd32v_ble_gattc_reset();
     return 0;
+}
+
+int klin_gd32v_ble_gattc_discover(int timeout_ms)
+{
+    if (!s_inited || !s_central_connected) {
+        return -1;
+    }
+    klin_gd32v_ble_gattc_reset();
+    s_gattc_disc_done = 0;
+    s_gattc_svc_found = 0;
+    if (ble_gattc_start_discovery((uint8_t)s_central_conn_idx,
+                                  klin_gd32v_ble_gattc_disc_done) != BLE_ERR_NO_ERROR) {
+        return -1;
+    }
+    if (klin_gd32v_ble_wait_flag(&s_gattc_disc_done, timeout_ms) != 0) {
+        return -1;
+    }
+    if (s_gattc_op_rc != (int)BLE_ERR_NO_ERROR) {
+        return -1;
+    }
+    if (!s_gattc_svc_found) {
+        return -1;
+    }
+    if (klin_gd32v_ble_gattc_resolve_handles() != 0) {
+        return -1;
+    }
+    s_gattc_ready = 1;
+    return 0;
+}
+
+int klin_gd32v_ble_gattc_ready(void)
+{
+    return (s_gattc_ready && s_central_connected) ? 1 : 0;
+}
+
+int klin_gd32v_ble_gattc_read(int timeout_ms)
+{
+    if (!s_inited || !s_gattc_ready || !s_central_connected ||
+        s_gattc_val_handle == 0) {
+        return -1;
+    }
+    s_gattc_op_done = 0;
+    s_gattc_op_rc = 0;
+    s_gattc_buf_len = 0;
+    if (ble_gattc_read((uint8_t)s_central_conn_idx, s_gattc_val_handle, 0, 0) !=
+        BLE_ERR_NO_ERROR) {
+        return -1;
+    }
+    if (klin_gd32v_ble_wait_flag(&s_gattc_op_done, timeout_ms) != 0) {
+        return -1;
+    }
+    return s_gattc_op_rc == (int)BLE_ERR_NO_ERROR ? 0 : -1;
+}
+
+int klin_gd32v_ble_gattc_write(const unsigned char *data, int len, int timeout_ms)
+{
+    if (!s_inited || !s_gattc_ready || !s_central_connected ||
+        s_gattc_val_handle == 0 || data == NULL || len < 0 ||
+        len > KLIN_GD32V_BLE_GATT_VALUE_MAX) {
+        return -1;
+    }
+    s_gattc_op_done = 0;
+    s_gattc_op_rc = 0;
+    if (ble_gattc_write_req((uint8_t)s_central_conn_idx, s_gattc_val_handle,
+                            (uint16_t)len, (uint8_t *)data) != BLE_ERR_NO_ERROR) {
+        return -1;
+    }
+    if (klin_gd32v_ble_wait_flag(&s_gattc_op_done, timeout_ms) != 0) {
+        return -1;
+    }
+    return s_gattc_op_rc == (int)BLE_ERR_NO_ERROR ? 0 : -1;
+}
+
+int klin_gd32v_ble_gattc_subscribe(int timeout_ms)
+{
+    uint8_t cccd[2];
+
+    if (!s_inited || !s_gattc_ready || !s_central_connected) {
+        return -1;
+    }
+    if (s_gattc_cccd_handle == 0) {
+        return -1;
+    }
+    cccd[0] = 0x01;
+    cccd[1] = 0x00;
+    s_gattc_op_done = 0;
+    s_gattc_op_rc = 0;
+    if (ble_gattc_write_req((uint8_t)s_central_conn_idx, s_gattc_cccd_handle, 2,
+                            cccd) != BLE_ERR_NO_ERROR) {
+        return -1;
+    }
+    if (klin_gd32v_ble_wait_flag(&s_gattc_op_done, timeout_ms) != 0) {
+        return -1;
+    }
+    return s_gattc_op_rc == (int)BLE_ERR_NO_ERROR ? 0 : -1;
 }
 
 #else /* host stubs — no SDK headers */
@@ -543,6 +804,7 @@ int klin_gd32v_ble_init(void)
     s_scan_count = 0;
     memset(s_gatt_value, 0, sizeof(s_gatt_value));
     memset(s_scan, 0, sizeof(s_scan));
+    klin_gd32v_ble_gattc_reset();
     return 0;
 }
 
@@ -594,6 +856,7 @@ int klin_gd32v_ble_stop(void)
     s_scan_count = 0;
     memset(s_gatt_value, 0, sizeof(s_gatt_value));
     memset(s_scan, 0, sizeof(s_scan));
+    klin_gd32v_ble_gattc_reset();
     return 0;
 }
 
@@ -657,6 +920,63 @@ int klin_gd32v_ble_central_wait_connected(int timeout_ms)
 int klin_gd32v_ble_central_disconnect(void)
 {
     s_central_connected = 0;
+    klin_gd32v_ble_gattc_reset();
+    return 0;
+}
+
+int klin_gd32v_ble_gattc_discover(int timeout_ms)
+{
+    (void)timeout_ms;
+    if (!s_inited || !s_central_connected) {
+        return -1;
+    }
+    klin_gd32v_ble_gattc_reset();
+    s_gattc_val_handle = 1;
+    s_gattc_cccd_handle = 2;
+    s_gattc_ready = 1;
+    return 0;
+}
+
+int klin_gd32v_ble_gattc_ready(void)
+{
+    return (s_gattc_ready && s_central_connected) ? 1 : 0;
+}
+
+int klin_gd32v_ble_gattc_read(int timeout_ms)
+{
+    (void)timeout_ms;
+    if (!s_inited || !s_gattc_ready || !s_central_connected) {
+        return -1;
+    }
+    s_gattc_buf[0] = 0xA1;
+    s_gattc_buf[1] = 0xA2;
+    s_gattc_buf_len = 2;
+    return 0;
+}
+
+int klin_gd32v_ble_gattc_write(const unsigned char *data, int len, int timeout_ms)
+{
+    (void)timeout_ms;
+    if (!s_inited || !s_gattc_ready || !s_central_connected || data == NULL ||
+        len < 0 || len > KLIN_GD32V_BLE_GATT_VALUE_MAX) {
+        return -1;
+    }
+    if (len > 0) {
+        memcpy(s_gattc_buf, data, (size_t)len);
+    }
+    s_gattc_buf_len = len;
+    return 0;
+}
+
+int klin_gd32v_ble_gattc_subscribe(int timeout_ms)
+{
+    (void)timeout_ms;
+    if (!s_inited || !s_gattc_ready || !s_central_connected) {
+        return -1;
+    }
+    if (s_gattc_cccd_handle == 0) {
+        return -1;
+    }
     return 0;
 }
 
@@ -755,4 +1075,35 @@ int klin_gd32v_ble_scan_name(int index, unsigned char *out, int max_len)
 int klin_gd32v_ble_central_connected(void)
 {
     return s_central_connected ? 1 : 0;
+}
+
+int klin_gd32v_ble_gattc_notified(void)
+{
+    int n;
+
+    n = s_gattc_notified;
+    s_gattc_notified = 0;
+    return n;
+}
+
+int klin_gd32v_ble_gattc_get(unsigned char *out, int max_len)
+{
+    int n;
+
+    if (out == NULL || max_len < 0) {
+        return -1;
+    }
+    n = s_gattc_buf_len;
+    if (n > max_len) {
+        n = max_len;
+    }
+    if (n > 0) {
+        memcpy(out, s_gattc_buf, (size_t)n);
+    }
+    return n;
+}
+
+int klin_gd32v_ble_gattc_len(void)
+{
+    return s_gattc_buf_len;
 }

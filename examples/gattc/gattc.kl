@@ -1,0 +1,65 @@
+// GD32VW553 BLE GATT client — needs GD32VW55x_WiFi_BLE_SDK (central + GATT client build).
+// Scan → connect → gattc_discover → read/write/subscribe against peer 0xFFF0/0xFFF1.
+import "../../gd32v_ble" ble
+
+fn main() {
+    let mut e = ble.init()
+    if e != ble.err_ok() {
+        return
+    }
+
+    e = ble.scan_start(5000)
+    if e != ble.err_ok() {
+        return
+    }
+    if ble.scan_count() < 1 {
+        while true {
+            let mut i: i32 = 0
+            while i < 20000000 {
+                i = i + 1
+            }
+        }
+    }
+
+    e = ble.central_connect(0, 10000)
+    if e != ble.err_ok() {
+        return
+    }
+    e = ble.central_wait_connected(15000)
+    if e != ble.err_ok() {
+        return
+    }
+
+    e = ble.gattc_discover(10000)
+    if e != ble.err_ok() {
+        return
+    }
+
+    e = ble.gattc_subscribe(5000)
+    if e != ble.err_ok() {
+        return
+    }
+
+    e = ble.gattc_read(5000)
+    if e != ble.err_ok() {
+        return
+    }
+
+    let mut out: [1]u8
+    out[0] = 7
+    e = ble.gattc_write(cast(*u8, &out[0]), 1, 5000)
+    if e != ble.err_ok() {
+        return
+    }
+
+    while ble.central_connected() {
+        if ble.gattc_notified() {
+            let mut buf: [20]u8
+            let _n = ble.gattc_get(cast(*mut u8, &buf[0]), ble.gatt_value_max())
+        }
+        let mut i: i32 = 0
+        while i < 20000000 {
+            i = i + 1
+        }
+    }
+}

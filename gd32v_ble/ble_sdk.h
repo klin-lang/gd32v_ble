@@ -1,10 +1,11 @@
-/* Thin BLE advertise + GATT + central scan helpers for Klin over the
- * GigaDevice VW55x BLE SDK. Heap / OSAL BLE task / GAP / GATTS / scan
- * events are SDK contracts (not Klin magic).
+/* Thin BLE advertise + GATT + central scan + GATT client helpers for Klin over
+ * the GigaDevice VW55x BLE SDK. Heap / OSAL BLE task / GAP / GATTS / GATTC /
+ * scan events are SDK contracts (not Klin magic).
  *
- * `@v0.3.0` = peripheral advertise + GATT MVP + central scan/connect (AN152).
+ * `@v0.4.0` = advertise + GATT MVP + central scan/connect + GATT client
+ * (discover/read/write/subscribe against fixed 0xFFF0/0xFFF1).
  * Scan results use a fixed table (max 16) — no Klin / glue malloc.
- * Central needs an SDK build with observer/central roles (e.g. msdk_ffd).
+ * Central / GATT client need an SDK build with those roles (e.g. msdk_ffd).
  */
 #pragma once
 
@@ -22,7 +23,7 @@ extern "C" {
 /** Max GAP name bytes stored per scan result (NUL-terminated in C). */
 #define KLIN_GD32V_BLE_SCAN_NAME_MAX 28
 
-/** `ble_init(true)` + `ble_wait_ready` + GATT svc add + scan/conn callbacks. */
+/** `ble_init(true)` + `ble_wait_ready` + GATT svc add + scan/conn/gattc. */
 int klin_gd32v_ble_init(void);
 
 /** Set GAP name + start legacy undirected connectable advertise (`app_adv_create`). */
@@ -53,13 +54,26 @@ int klin_gd32v_ble_scan_addr(int index, unsigned char *out6);
 int klin_gd32v_ble_scan_name(int index, unsigned char *out, int max_len);
 
 /**
- * Connect as central to scan result `index`. GAP only — no GATT client.
+ * Connect as central to scan result `index`. GAP only — then `gattc_discover`.
  * `timeout_ms` is reserved for wait helpers (`-1` = forever hint).
  */
 int klin_gd32v_ble_central_connect(int index, int timeout_ms);
 int klin_gd32v_ble_central_connected(void);
 int klin_gd32v_ble_central_wait_connected(int timeout_ms);
 int klin_gd32v_ble_central_disconnect(void);
+
+/**
+ * Discover peer svc 0xFFF0 / chr 0xFFF1 (+ CCCD if present). Blocks.
+ * Requires an active central connection. 0 = ready for read/write.
+ */
+int klin_gd32v_ble_gattc_discover(int timeout_ms);
+int klin_gd32v_ble_gattc_ready(void);
+int klin_gd32v_ble_gattc_read(int timeout_ms);
+int klin_gd32v_ble_gattc_write(const unsigned char *data, int len, int timeout_ms);
+int klin_gd32v_ble_gattc_subscribe(int timeout_ms);
+int klin_gd32v_ble_gattc_notified(void);
+int klin_gd32v_ble_gattc_get(unsigned char *out, int max_len);
+int klin_gd32v_ble_gattc_len(void);
 
 #ifdef __cplusplus
 }

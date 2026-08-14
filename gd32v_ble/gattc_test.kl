@@ -1,0 +1,55 @@
+module gd32v_ble
+
+import testing
+
+fn test_host_stub_gattc_after_central() {
+    let mut out: [20]u8
+    let mut n: i32
+    let mut r: i32
+    let mut seed: [2]u8
+
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(scan_start(100), 0)
+    testing.assert_eq_i32(central_connect(0, 1000), 0)
+    testing.assert_eq_i32(central_wait_connected(100), 0)
+    r = 0
+    if gattc_ready() {
+        r = 1
+    }
+    testing.assert_eq_i32(r, 0)
+    testing.assert_eq_i32(gattc_discover(1000), 0)
+    r = 0
+    if gattc_ready() {
+        r = 1
+    }
+    testing.assert_eq_i32(r, 1)
+    testing.assert_eq_i32(gattc_read(1000), 0)
+    testing.assert_eq_i32(gattc_len(), 2)
+    n = gattc_get(cast(*mut u8, &out[0]), gatt_value_max())
+    testing.assert_eq_i32(n, 2)
+    testing.assert(out[0] == 0xA1)
+    testing.assert(out[1] == 0xA2)
+    seed[0] = 9
+    seed[1] = 8
+    testing.assert_eq_i32(gattc_write(cast(*u8, &seed[0]), 2, 1000), 0)
+    testing.assert_eq_i32(gattc_len(), 2)
+    testing.assert_eq_i32(gattc_subscribe(1000), 0)
+    r = 0
+    if gattc_notified() {
+        r = 1
+    }
+    testing.assert_eq_i32(r, 0)
+    testing.assert_eq_i32(central_disconnect(), 0)
+    r = 0
+    if gattc_ready() {
+        r = 1
+    }
+    testing.assert_eq_i32(r, 0)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_gattc_discover_needs_central() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(gattc_discover(100), 0 - 1)
+    testing.assert_eq_i32(stop(), 0)
+}
