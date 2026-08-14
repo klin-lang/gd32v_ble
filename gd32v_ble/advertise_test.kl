@@ -1,0 +1,28 @@
+module gd32v_ble
+
+import testing
+
+fn test_advertise_host_stub() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(advertise("klin"), 0)
+    testing.assert_eq_i32(advertising(), 1)
+    testing.assert_eq_i32(connected(), 0)
+    testing.assert_eq_i32(wait_connected(0), 0)
+    testing.assert_eq_i32(connected(), 1)
+    testing.assert_eq_i32(stop_advertise(), 0)
+    testing.assert_eq_i32(advertising(), 0)
+    testing.assert_eq_i32(stop(), 0)
+    testing.assert_eq_i32(connected(), 0)
+}
+
+fn test_advertise_empty_name_fails() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(advertise(""), 0 - 1)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_wait_connected_needs_advertise() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(wait_connected(0), 0 - 1)
+    testing.assert_eq_i32(stop(), 0)
+}

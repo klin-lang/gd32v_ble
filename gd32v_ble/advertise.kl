@@ -1,0 +1,65 @@
+/// GD32VW553 BLE peripheral advertise — thin Klin surface over `ble_sdk.c`.
+/// Engine = GigaDevice VW55x BLE SDK (`ble_init` / `app_adv_*`, AN152).
+/// Not part of `machine_gd32v`. Not `esp_ble` (ESP-IDF NimBLE).
+/// First tag = advertise only. GATT / central later.
+module gd32v_ble
+
+@[link("ble_sdk.c")]
+@[cimport, codename("klin_gd32v_ble_init")]
+fn klin_gd32v_ble_init(): i32
+
+@[cimport, codename("klin_gd32v_ble_advertise")]
+fn klin_gd32v_ble_advertise(name: str): i32
+
+@[cimport, codename("klin_gd32v_ble_stop_advertise")]
+fn klin_gd32v_ble_stop_advertise(): i32
+
+@[cimport, codename("klin_gd32v_ble_connected")]
+fn klin_gd32v_ble_connected(): i32
+
+@[cimport, codename("klin_gd32v_ble_advertising")]
+fn klin_gd32v_ble_advertising(): i32
+
+@[cimport, codename("klin_gd32v_ble_wait_connected")]
+fn klin_gd32v_ble_wait_connected(timeout_ms: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_stop")]
+fn klin_gd32v_ble_stop(): i32
+
+/// SDK / glue success (0).
+pub fn err_ok(): i32 {
+    return 0
+}
+
+/// `ble_init` + `ble_wait_ready` (once).
+pub fn init(): i32 {
+    return klin_gd32v_ble_init()
+}
+
+/// Legacy undirected connectable advertise. GAP name copied in C.
+pub fn advertise(name: str): i32 {
+    return klin_gd32v_ble_advertise(name)
+}
+
+pub fn stop_advertise(): i32 {
+    return klin_gd32v_ble_stop_advertise()
+}
+
+/// 1 after `wait_connected` (host stub) / GAP connect (board, later hook).
+pub fn connected(): i32 {
+    return klin_gd32v_ble_connected()
+}
+
+pub fn advertising(): i32 {
+    return klin_gd32v_ble_advertising()
+}
+
+/// Block until a central connects or `timeout_ms` (`-1` = forever).
+/// Host stub succeeds immediately after `advertise`.
+pub fn wait_connected(timeout_ms: i32): i32 {
+    return klin_gd32v_ble_wait_connected(timeout_ms)
+}
+
+pub fn stop(): i32 {
+    return klin_gd32v_ble_stop()
+}

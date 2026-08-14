@@ -1,0 +1,7 @@
+out/
+examples/**/out/
+*.elf
+.DS_Store
+klin.lock
+examples/**/klin.mod
+examples/**/klin.lock

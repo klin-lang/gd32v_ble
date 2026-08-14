@@ -1,0 +1,17 @@
+// GD32VW553 BLE advertise — needs GD32VW55x_WiFi_BLE_SDK on the include/link path.
+import "../../gd32v_ble" ble
+
+fn main() {
+    let mut e = ble.init()
+    if e != ble.err_ok() {
+        return
+    }
+    e = ble.advertise("klin")
+    if e != ble.err_ok() {
+        return
+    }
+    e = ble.wait_connected(-1)
+    if e != ble.err_ok() {
+        return
+    }
+}

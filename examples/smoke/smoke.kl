@@ -1,0 +1,21 @@
+// Host-safe smoke: emit-c only (SDK stubs).
+import "../../gd32v_ble" ble
+
+fn main() {
+    let mut e = ble.init()
+    if e != ble.err_ok() {
+        return
+    }
+    e = ble.advertise("klin")
+    if e != ble.err_ok() {
+        return
+    }
+    let _a = ble.advertising()
+    e = ble.wait_connected(0)
+    if e != ble.err_ok() {
+        return
+    }
+    let _c = ble.connected()
+    let _v = ble.version()
+    let _s = ble.stop()
+}
