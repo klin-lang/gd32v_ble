@@ -1,0 +1,47 @@
+// GD32VW553 BLE GATT peripheral — needs GD32VW55x_WiFi_BLE_SDK on the include/link path.
+// Service 0xFFF0 / char 0xFFF1 — read, write, notify.
+import "../../gd32v_ble" ble
+
+fn main() {
+    let mut e = ble.init()
+    if e != ble.err_ok() {
+        return
+    }
+
+    let mut seed: [1]u8
+    seed[0] = 42
+    e = ble.gatt_set(cast(*u8, &seed[0]), 1)
+    if e != ble.err_ok() {
+        return
+    }
+
+    e = ble.advertise("klin-gatt")
+    if e != ble.err_ok() {
+        return
+    }
+
+    e = ble.wait_connected(-1)
+    if e != ble.err_ok() {
+        return
+    }
+
+    let mut counter: u8 = 42
+    while true {
+        if ble.gatt_written() {
+            let mut buf: [20]u8
+            let n = ble.gatt_get(cast(*mut u8, &buf[0]), ble.gatt_value_max())
+            if n > 0 {
+                counter = buf[0]
+            }
+        }
+        counter = counter + 1
+        let mut out: [1]u8
+        out[0] = counter
+        let _s = ble.gatt_set(cast(*u8, &out[0]), 1)
+        let _n = ble.gatt_notify()
+        let mut i: i32 = 0
+        while i < 8000000 {
+            i = i + 1
+        }
+    }
+}

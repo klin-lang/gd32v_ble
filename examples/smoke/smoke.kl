@@ -6,6 +6,19 @@ fn main() {
     if e != ble.err_ok() {
         return
     }
+    let mut seed: [1]u8
+    seed[0] = 42
+    e = ble.gatt_set(cast(*u8, &seed[0]), 1)
+    if e != ble.err_ok() {
+        return
+    }
+    let _len = ble.gatt_len()
+    let mut buf: [20]u8
+    let _n = ble.gatt_get(cast(*mut u8, &buf[0]), ble.gatt_value_max())
+    let _w = ble.gatt_written()
+    let _nt = ble.gatt_notify()
+    let _svc = ble.gatt_svc_uuid16()
+    let _chr = ble.gatt_chr_uuid16()
     e = ble.advertise("klin")
     if e != ble.err_ok() {
         return

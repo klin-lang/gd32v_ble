@@ -2,10 +2,16 @@ module gd32v_ble
 
 import testing
 
-fn test_version_is_one() {
-    testing.assert_eq_i32(version(), 1)
+fn test_version_is_two() {
+    testing.assert_eq_i32(version(), 2)
 }
 
 fn test_err_ok_is_zero() {
     testing.assert_eq_i32(err_ok(), 0)
+}
+
+fn test_gatt_uuids_and_max() {
+    testing.assert_eq_i32(gatt_svc_uuid16(), 0xFFF0)
+    testing.assert_eq_i32(gatt_chr_uuid16(), 0xFFF1)
+    testing.assert_eq_i32(gatt_value_max(), 20)
 }

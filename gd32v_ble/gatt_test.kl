@@ -1,0 +1,44 @@
+module gd32v_ble
+
+import testing
+
+fn test_gatt_set_get_roundtrip() {
+    let mut buf: [20]u8
+    let mut out: [20]u8
+    let mut n: i32
+    let mut w: i32
+
+    testing.assert_eq_i32(init(), 0)
+    buf[0] = 1
+    buf[1] = 2
+    buf[2] = 3
+    testing.assert_eq_i32(gatt_set(cast(*u8, &buf[0]), 3), 0)
+    testing.assert_eq_i32(gatt_len(), 3)
+    n = gatt_get(cast(*mut u8, &out[0]), gatt_value_max())
+    testing.assert_eq_i32(n, 3)
+    testing.assert(out[0] == 1)
+    testing.assert(out[1] == 2)
+    testing.assert(out[2] == 3)
+    w = 0
+    if gatt_written() {
+        w = 1
+    }
+    testing.assert_eq_i32(w, 0)
+    testing.assert_eq_i32(gatt_notify(), 0)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_gatt_set_needs_init() {
+    testing.assert_eq_i32(stop(), 0)
+    let mut buf: [1]u8
+    buf[0] = 9
+    testing.assert_eq_i32(gatt_set(cast(*u8, &buf[0]), 1), 0 - 1)
+}
+
+fn test_gatt_set_rejects_oversize() {
+    let mut buf: [21]u8
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(gatt_set(cast(*u8, &buf[0]), 21), 0 - 1)
+    testing.assert_eq_i32(gatt_len(), 0)
+    testing.assert_eq_i32(stop(), 0)
+}

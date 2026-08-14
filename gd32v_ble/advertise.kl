@@ -1,7 +1,9 @@
-/// GD32VW553 BLE peripheral advertise — thin Klin surface over `ble_sdk.c`.
-/// Engine = GigaDevice VW55x BLE SDK (`ble_init` / `app_adv_*`, AN152).
+/// GD32VW553 BLE peripheral — thin Klin surface over `ble_sdk.c`.
+/// Engine = GigaDevice VW55x BLE SDK (`ble_init` / `app_adv_*` / `ble_gatts_*`, AN152).
 /// Not part of `machine_gd32v`. Not `esp_ble` (ESP-IDF NimBLE).
-/// First tag = advertise only. GATT / central later.
+///
+/// GATT MVP (`@v0.2.0`): fixed service `0xFFF0`, char `0xFFF1`
+/// (read / write / notify), value buffer max 20 bytes.
 module gd32v_ble
 
 @[link("ble_sdk.c")]
@@ -26,12 +28,42 @@ fn klin_gd32v_ble_wait_connected(timeout_ms: i32): i32
 @[cimport, codename("klin_gd32v_ble_stop")]
 fn klin_gd32v_ble_stop(): i32
 
+@[cimport, codename("klin_gd32v_ble_gatt_set")]
+fn klin_gd32v_ble_gatt_set(data: *u8, len: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_gatt_get")]
+fn klin_gd32v_ble_gatt_get(out: *mut u8, max_len: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_gatt_len")]
+fn klin_gd32v_ble_gatt_len(): i32
+
+@[cimport, codename("klin_gd32v_ble_gatt_notify")]
+fn klin_gd32v_ble_gatt_notify(): i32
+
+@[cimport, codename("klin_gd32v_ble_gatt_written")]
+fn klin_gd32v_ble_gatt_written(): i32
+
 /// SDK / glue success (0).
 pub fn err_ok(): i32 {
     return 0
 }
 
-/// `ble_init` + `ble_wait_ready` (once).
+/// Primary service UUID (16-bit) — fixed for MVP.
+pub fn gatt_svc_uuid16(): i32 {
+    return 0xFFF0
+}
+
+/// Characteristic UUID (16-bit) — fixed for MVP.
+pub fn gatt_chr_uuid16(): i32 {
+    return 0xFFF1
+}
+
+/// Max GATT value length (bytes).
+pub fn gatt_value_max(): i32 {
+    return 20
+}
+
+/// `ble_init` + `ble_wait_ready` + GATT svc add (once).
 pub fn init(): i32 {
     return klin_gd32v_ble_init()
 }
@@ -45,7 +77,7 @@ pub fn stop_advertise(): i32 {
     return klin_gd32v_ble_stop_advertise()
 }
 
-/// 1 after `wait_connected` (host stub) / GAP connect (board, later hook).
+/// 1 after `wait_connected` (host stub) / GATTS connect (board).
 pub fn connected(): i32 {
     return klin_gd32v_ble_connected()
 }
@@ -56,10 +88,35 @@ pub fn advertising(): i32 {
 
 /// Block until a central connects or `timeout_ms` (`-1` = forever).
 /// Host stub succeeds immediately after `advertise`.
+/// On-device: polls a flag set by `BLE_SRV_EVT_CONN_STATE_CHANGE_IND`.
 pub fn wait_connected(timeout_ms: i32): i32 {
     return klin_gd32v_ble_wait_connected(timeout_ms)
 }
 
 pub fn stop(): i32 {
     return klin_gd32v_ble_stop()
+}
+
+/// Copy `len` bytes from `data` into the characteristic value (max `gatt_value_max()`).
+pub fn gatt_set(data: *u8, len: i32): i32 {
+    return klin_gd32v_ble_gatt_set(data, len)
+}
+
+/// Copy current value into `out`. Returns byte count, or negative on error.
+pub fn gatt_get(out: *mut u8, max_len: i32): i32 {
+    return klin_gd32v_ble_gatt_get(out, max_len)
+}
+
+pub fn gatt_len(): i32 {
+    return klin_gd32v_ble_gatt_len()
+}
+
+/// Notify subscribed centrals (no-op if none).
+pub fn gatt_notify(): i32 {
+    return klin_gd32v_ble_gatt_notify()
+}
+
+/// True if a central wrote since last poll (flag cleared).
+pub fn gatt_written(): bool {
+    return klin_gd32v_ble_gatt_written() != 0
 }
