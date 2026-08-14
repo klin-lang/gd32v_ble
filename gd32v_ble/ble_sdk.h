@@ -2,7 +2,7 @@
  * Klin over the GigaDevice VW55x BLE SDK. Heap / OSAL BLE task / GAP / GATTS /
  * GATTC / security / scan events are SDK contracts (not Klin magic).
  *
- * `@v0.6.0` = … + custom 16-bit GATT UUIDs (`gatt_uuid16` before `init`).
+ * `@v0.7.0` = … + fixed passkey/PIN bonding (`bond_passkey`, MITM).
  * Scan results use a fixed table (max 16) — no Klin / glue malloc.
  * Central / GATT client / bonding need an SDK build with those roles (e.g. msdk_ffd).
  */
@@ -90,12 +90,37 @@ int klin_gd32v_ble_gattc_len(void);
 /**
  * Enable Just Works bonding (SM config via `app_sec_set_authen`). Call after
  * `init`, before `bond_start`. Keys stored by SDK peer storage (flash).
+ * Clears any prior `bond_passkey` config.
  */
 int klin_gd32v_ble_bond_enable(void);
 
 /**
+ * Enable bonding with a fixed 6-digit passkey/PIN (`0..=999999`). MITM +
+ * keyboard/display IO (`app_sec_set_authen` + `app_sec_pin_code_set`).
+ * On input-key / numeric-compare requests the PIN is auto-injected / accepted.
+ * Replaces Just Works SM config from `bond_enable`.
+ */
+int klin_gd32v_ble_bond_passkey(int passkey);
+
+/** Configured passkey, or 0 if Just Works / unset. */
+int klin_gd32v_ble_passkey(void);
+
+/**
+ * Last passkey action code (0 = none; 2 = input; 3 = display; 4 = numeric
+ * compare — same numbering as NimBLE `BLE_SM_IOACT_*` for Klin parity).
+ */
+int klin_gd32v_ble_passkey_action(void);
+
+/**
+ * Manual inject for an outstanding INPUT action (usually not needed —
+ * `bond_passkey` auto-injects).
+ */
+int klin_gd32v_ble_passkey_inject(int passkey);
+
+/**
  * Start pairing on the active link (central preferred, else peripheral).
- * Requires `bond_enable`. Completes via `app_sec` authen callback.
+ * Requires `bond_enable` or `bond_passkey`. Completes via `app_sec` authen
+ * callback.
  */
 int klin_gd32v_ble_bond_start(void);
 int klin_gd32v_ble_bonded(void);

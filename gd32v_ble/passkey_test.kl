@@ -1,0 +1,40 @@
+module gd32v_ble
+
+import testing
+
+fn test_bond_passkey_sets_pin() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(bond_passkey(123456), 0)
+    testing.assert_eq_i32(passkey(), 123456)
+    testing.assert_eq_i32(scan_start(100), 0)
+    testing.assert_eq_i32(central_connect(0, 1000), 0)
+    testing.assert_eq_i32(bond_start(), 0)
+    testing.assert_eq_i32(wait_bonded(100), 0)
+    testing.assert_eq_i32(passkey_action(), 3)
+    testing.assert_eq_i32(passkey_inject(123456), 0)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_bond_passkey_rejects_bad_range() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(bond_passkey(0 - 1), 0 - 1)
+    testing.assert_eq_i32(bond_passkey(1000000), 0 - 1)
+    testing.assert_eq_i32(passkey(), 0)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_bond_enable_clears_passkey() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(bond_passkey(654321), 0)
+    testing.assert_eq_i32(passkey(), 654321)
+    testing.assert_eq_i32(bond_enable(), 0)
+    testing.assert_eq_i32(passkey(), 0)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_passkey_inject_needs_passkey_mode() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(bond_enable(), 0)
+    testing.assert_eq_i32(passkey_inject(123456), 0 - 1)
+    testing.assert_eq_i32(stop(), 0)
+}

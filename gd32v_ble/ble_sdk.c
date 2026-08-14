@@ -1,7 +1,7 @@
 /* BLE advertise + GATT + central scan + GATT client + bonding + custom UUID16
- * for Klin on GD32VW553. Real path: GigaDevice VW55x Wi-Fi BLE SDK (AN152
- * `ble_init` / `app_adv_*` / `ble_gatts_*` / `ble_scan_*` / `ble_conn_*` /
- * `ble_gattc_*` / `app_sec_*`). Host path: stubs when SDK headers are not on
+ * + passkey for Klin on GD32VW553. Real path: GigaDevice VW55x Wi-Fi BLE SDK
+ * (AN152 `ble_init` / `app_adv_*` / `ble_gatts_*` / `ble_scan_*` / `ble_conn_*`
+ * / `ble_gattc_*` / `app_sec_*`). Host path: stubs when SDK headers are not on
  * the include path.
  *
  * Scan table is fixed (max 16) — no glue malloc. Central / GATT client /
@@ -74,6 +74,11 @@ static int s_gattc_notified;
 
 static int s_bond_enabled;
 static int s_bonded;
+/* Just Works: bond_enable. Passkey/PIN: bond_passkey(pin). */
+static int s_passkey_mode;
+static uint32_t s_passkey;
+static int s_passkey_action; /* 0 / 2=input / 3=disp / 4=numcmp */
+static uint8_t s_passkey_conn_idx;
 
 /* Mutable: set via gatt_uuid16() before init (server DB + gattc discover). */
 static uint16_t s_svc_uuid16 = (uint16_t)KLIN_GD32V_BLE_GATT_SVC_UUID16;
@@ -102,6 +107,14 @@ static void klin_gd32v_ble_gattc_reset(void)
 static void klin_gd32v_ble_bond_link_reset(void)
 {
     s_bonded = 0;
+}
+
+static void klin_gd32v_ble_passkey_reset(void)
+{
+    s_passkey_mode = 0;
+    s_passkey = 0;
+    s_passkey_action = 0;
+    s_passkey_conn_idx = 0;
 }
 
 #ifdef KLIN_GD32V_BLE_HAVE_SDK
@@ -504,6 +517,7 @@ int klin_gd32v_ble_init(void)
     klin_gd32v_ble_gatt_reset();
     klin_gd32v_ble_gattc_reset();
     klin_gd32v_ble_bond_link_reset();
+    klin_gd32v_ble_passkey_reset();
     s_bond_enabled = 0;
     klin_gd32v_ble_scan_clear();
     return 0;
@@ -608,6 +622,7 @@ int klin_gd32v_ble_stop(void)
     klin_gd32v_ble_gatt_reset();
     klin_gd32v_ble_gattc_reset();
     klin_gd32v_ble_bond_link_reset();
+    klin_gd32v_ble_passkey_reset();
     klin_gd32v_ble_scan_clear();
     ble_deinit();
     return 0;
@@ -834,20 +849,104 @@ static void klin_gd32v_ble_authen_cmpl(uint8_t conn_idx, uint8_t result)
     }
 }
 
-int klin_gd32v_ble_bond_enable(void)
+static void klin_gd32v_ble_input_key_req(uint8_t conn_idx)
+{
+    s_passkey_conn_idx = conn_idx;
+    s_passkey_action = 2; /* INPUT */
+    if (s_passkey_mode) {
+        app_sec_input_passkey(conn_idx, s_passkey);
+    }
+}
+
+static void klin_gd32v_ble_key_cfm_req(uint8_t conn_idx, uint32_t key)
+{
+    (void)key;
+    s_passkey_conn_idx = conn_idx;
+    s_passkey_action = 4; /* NUMCMP */
+    if (s_passkey_mode) {
+        app_sec_num_compare(conn_idx, 1);
+    }
+}
+
+static void klin_gd32v_ble_sec_callbacks_install(void)
 {
     app_sec_callbacks cb;
 
+    memset(&cb, 0, sizeof(cb));
+    cb.authen_cmpl = klin_gd32v_ble_authen_cmpl;
+    cb.input_key_req = klin_gd32v_ble_input_key_req;
+    cb.key_cfm_req = klin_gd32v_ble_key_cfm_req;
+    (void)app_sec_callbacks_set(cb);
+}
+
+int klin_gd32v_ble_bond_enable(void)
+{
     if (!s_inited) {
         return -1;
     }
     /* Just Works: no IO / no MITM / SC + bond. Keys stored by SDK storage. */
     app_sec_set_authen(1, 0, 1, BLE_GAP_IO_CAP_NO_IO, 0, 0, 16);
-    memset(&cb, 0, sizeof(cb));
-    cb.authen_cmpl = klin_gd32v_ble_authen_cmpl;
-    (void)app_sec_callbacks_set(cb);
+    klin_gd32v_ble_sec_callbacks_install();
+    klin_gd32v_ble_passkey_reset();
     s_bond_enabled = 1;
     klin_gd32v_ble_bond_link_reset();
+    return 0;
+}
+
+int klin_gd32v_ble_bond_passkey(int passkey)
+{
+    if (!s_inited) {
+        return -1;
+    }
+    if (passkey < 0 || passkey > 999999) {
+        return -1;
+    }
+    /* MITM + keyboard/display IO + SC + bond. Fixed PIN via pin_code_set. */
+    app_sec_set_authen(1, 1, 1, BLE_GAP_IO_CAP_KEYBOARD_DISPLAY, 0, 0, 16);
+    if (!app_sec_pin_code_set((uint32_t)passkey)) {
+        return -1;
+    }
+    klin_gd32v_ble_sec_callbacks_install();
+    s_passkey = (uint32_t)passkey;
+    s_passkey_mode = 1;
+    s_passkey_action = 0;
+    s_passkey_conn_idx = 0;
+    s_bond_enabled = 1;
+    klin_gd32v_ble_bond_link_reset();
+    return 0;
+}
+
+int klin_gd32v_ble_passkey(void)
+{
+    return s_passkey_mode ? (int)s_passkey : 0;
+}
+
+int klin_gd32v_ble_passkey_action(void)
+{
+    return s_passkey_action;
+}
+
+int klin_gd32v_ble_passkey_inject(int passkey)
+{
+    uint8_t idx;
+
+    if (!s_inited || !s_passkey_mode) {
+        return -1;
+    }
+    if (passkey < 0 || passkey > 999999) {
+        return -1;
+    }
+    if (s_central_connected) {
+        idx = (uint8_t)s_central_conn_idx;
+    } else if (s_connected) {
+        idx = s_conn_idx;
+    } else if (s_passkey_action != 0) {
+        idx = s_passkey_conn_idx;
+    } else {
+        return -1;
+    }
+    s_passkey_action = 2;
+    app_sec_input_passkey(idx, (uint32_t)passkey);
     return 0;
 }
 
@@ -866,6 +965,11 @@ int klin_gd32v_ble_bond_start(void)
         return -1;
     }
     klin_gd32v_ble_bond_link_reset();
+    /* Display path uses app_sec_env.pin_code when set (bond_passkey). */
+    if (s_passkey_mode) {
+        s_passkey_action = 3; /* DISP expected / fixed PIN advertised */
+        s_passkey_conn_idx = idx;
+    }
     app_sec_send_bond_req(idx);
     return 0;
 }
@@ -934,6 +1038,7 @@ int klin_gd32v_ble_init(void)
     memset(s_scan, 0, sizeof(s_scan));
     klin_gd32v_ble_gattc_reset();
     klin_gd32v_ble_bond_link_reset();
+    klin_gd32v_ble_passkey_reset();
     return 0;
 }
 
@@ -988,6 +1093,7 @@ int klin_gd32v_ble_stop(void)
     memset(s_scan, 0, sizeof(s_scan));
     klin_gd32v_ble_gattc_reset();
     klin_gd32v_ble_bond_link_reset();
+    klin_gd32v_ble_passkey_reset();
     return 0;
 }
 
@@ -1116,8 +1222,47 @@ int klin_gd32v_ble_bond_enable(void)
     if (!s_inited) {
         return -1;
     }
+    klin_gd32v_ble_passkey_reset();
     s_bond_enabled = 1;
     klin_gd32v_ble_bond_link_reset();
+    return 0;
+}
+
+int klin_gd32v_ble_bond_passkey(int passkey)
+{
+    if (!s_inited) {
+        return -1;
+    }
+    if (passkey < 0 || passkey > 999999) {
+        return -1;
+    }
+    s_passkey = (uint32_t)passkey;
+    s_passkey_mode = 1;
+    s_passkey_action = 0;
+    s_bond_enabled = 1;
+    klin_gd32v_ble_bond_link_reset();
+    return 0;
+}
+
+int klin_gd32v_ble_passkey(void)
+{
+    return s_passkey_mode ? (int)s_passkey : 0;
+}
+
+int klin_gd32v_ble_passkey_action(void)
+{
+    return s_passkey_action;
+}
+
+int klin_gd32v_ble_passkey_inject(int passkey)
+{
+    if (!s_inited || !s_passkey_mode) {
+        return -1;
+    }
+    if (passkey < 0 || passkey > 999999) {
+        return -1;
+    }
+    s_passkey_action = 2;
     return 0;
 }
 
@@ -1128,6 +1273,9 @@ int klin_gd32v_ble_bond_start(void)
     }
     if (!s_central_connected && !s_connected) {
         return -1;
+    }
+    if (s_passkey_mode) {
+        s_passkey_action = 3;
     }
     s_bonded = 1;
     return 0;

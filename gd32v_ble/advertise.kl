@@ -9,6 +9,7 @@
 /// GATT client (`@v0.4.0`): discover/read/write/subscribe for active UUID16.
 /// Bonding (`@v0.5.0`): Just Works pair + SDK flash store (`bond_enable` / `bond_start`).
 /// Custom UUID16 (`@v0.6.0`): `gatt_uuid16` before `init` (default remains 0xFFF0/0xFFF1).
+/// Passkey (`@v0.7.0`): `bond_passkey(pin)` MITM + fixed PIN (replaces Just Works SM).
 /// Central / GATT client / bonding need an SDK build with those roles (e.g. msdk_ffd).
 module gd32v_ble
 
@@ -117,6 +118,18 @@ fn klin_gd32v_ble_gattc_len(): i32
 
 @[cimport, codename("klin_gd32v_ble_bond_enable")]
 fn klin_gd32v_ble_bond_enable(): i32
+
+@[cimport, codename("klin_gd32v_ble_bond_passkey")]
+fn klin_gd32v_ble_bond_passkey(passkey: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_passkey")]
+fn klin_gd32v_ble_passkey(): i32
+
+@[cimport, codename("klin_gd32v_ble_passkey_action")]
+fn klin_gd32v_ble_passkey_action(): i32
+
+@[cimport, codename("klin_gd32v_ble_passkey_inject")]
+fn klin_gd32v_ble_passkey_inject(passkey: i32): i32
 
 @[cimport, codename("klin_gd32v_ble_bond_start")]
 fn klin_gd32v_ble_bond_start(): i32
@@ -305,11 +318,30 @@ pub fn gattc_len(): i32 {
 }
 
 /// Enable Just Works bonding (SM config). Call after `init`, before `bond_start`.
+/// Clears any prior `bond_passkey` config.
 pub fn bond_enable(): i32 {
     return klin_gd32v_ble_bond_enable()
 }
 
+/// Bonding with fixed 6-digit PIN (`0..=999999`). MITM; auto-inject on pair.
+pub fn bond_passkey(passkey: i32): i32 {
+    return klin_gd32v_ble_bond_passkey(passkey)
+}
+
+pub fn passkey(): i32 {
+    return klin_gd32v_ble_passkey()
+}
+
+pub fn passkey_action(): i32 {
+    return klin_gd32v_ble_passkey_action()
+}
+
+pub fn passkey_inject(passkey: i32): i32 {
+    return klin_gd32v_ble_passkey_inject(passkey)
+}
+
 /// Start pairing on the active link (central preferred, else peripheral).
+/// Requires `bond_enable` or `bond_passkey`.
 pub fn bond_start(): i32 {
     return klin_gd32v_ble_bond_start()
 }
