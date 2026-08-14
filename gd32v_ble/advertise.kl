@@ -6,10 +6,11 @@
 /// GATT MVP (`@v0.2.0`): default service `0xFFF0`, char `0xFFF1`
 /// (read / write / notify), value buffer max 20 bytes.
 /// Central (`@v0.3.0`): active scan (max 16, dedupe by addr) + connect by index.
-/// GATT client (`@v0.4.0`): discover/read/write/subscribe for active UUID16.
+/// GATT client (`@v0.4.0`): discover/read/write/subscribe for active UUID.
 /// Bonding (`@v0.5.0`): Just Works pair + SDK flash store (`bond_enable` / `bond_start`).
 /// Custom UUID16 (`@v0.6.0`): `gatt_uuid16` before `init` (default remains 0xFFF0/0xFFF1).
 /// Passkey (`@v0.7.0`): `bond_passkey(pin)` MITM + fixed PIN (replaces Just Works SM).
+/// UUID128 + multi (`@v0.8.0`): `gatt_uuid128` / `gatt_add_*` / `gatt_*_at` / `gattc_select`.
 /// Central / GATT client / bonding need an SDK build with those roles (e.g. msdk_ffd).
 module gd32v_ble
 
@@ -38,6 +39,21 @@ fn klin_gd32v_ble_stop(): i32
 @[cimport, codename("klin_gd32v_ble_gatt_uuid16")]
 fn klin_gd32v_ble_gatt_uuid16(svc_uuid16: i32, chr_uuid16: i32): i32
 
+@[cimport, codename("klin_gd32v_ble_gatt_uuid128")]
+fn klin_gd32v_ble_gatt_uuid128(svc16: *u8, chr16: *u8): i32
+
+@[cimport, codename("klin_gd32v_ble_gatt_add_uuid16")]
+fn klin_gd32v_ble_gatt_add_uuid16(svc_uuid16: i32, chr_uuid16: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_gatt_add_uuid128")]
+fn klin_gd32v_ble_gatt_add_uuid128(svc16: *u8, chr16: *u8): i32
+
+@[cimport, codename("klin_gd32v_ble_gatt_clear")]
+fn klin_gd32v_ble_gatt_clear(): i32
+
+@[cimport, codename("klin_gd32v_ble_gatt_svc_count")]
+fn klin_gd32v_ble_gatt_svc_count(): i32
+
 @[cimport, codename("klin_gd32v_ble_gatt_svc_uuid16")]
 fn klin_gd32v_ble_gatt_svc_uuid16(): i32
 
@@ -47,17 +63,32 @@ fn klin_gd32v_ble_gatt_chr_uuid16(): i32
 @[cimport, codename("klin_gd32v_ble_gatt_set")]
 fn klin_gd32v_ble_gatt_set(data: *u8, len: i32): i32
 
+@[cimport, codename("klin_gd32v_ble_gatt_set_at")]
+fn klin_gd32v_ble_gatt_set_at(index: i32, data: *u8, len: i32): i32
+
 @[cimport, codename("klin_gd32v_ble_gatt_get")]
 fn klin_gd32v_ble_gatt_get(out: *mut u8, max_len: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_gatt_get_at")]
+fn klin_gd32v_ble_gatt_get_at(index: i32, out: *mut u8, max_len: i32): i32
 
 @[cimport, codename("klin_gd32v_ble_gatt_len")]
 fn klin_gd32v_ble_gatt_len(): i32
 
+@[cimport, codename("klin_gd32v_ble_gatt_len_at")]
+fn klin_gd32v_ble_gatt_len_at(index: i32): i32
+
 @[cimport, codename("klin_gd32v_ble_gatt_notify")]
 fn klin_gd32v_ble_gatt_notify(): i32
 
+@[cimport, codename("klin_gd32v_ble_gatt_notify_at")]
+fn klin_gd32v_ble_gatt_notify_at(index: i32): i32
+
 @[cimport, codename("klin_gd32v_ble_gatt_written")]
 fn klin_gd32v_ble_gatt_written(): i32
+
+@[cimport, codename("klin_gd32v_ble_gatt_written_at")]
+fn klin_gd32v_ble_gatt_written_at(index: i32): i32
 
 @[cimport, codename("klin_gd32v_ble_scan_start")]
 fn klin_gd32v_ble_scan_start(duration_ms: i32): i32
@@ -91,6 +122,15 @@ fn klin_gd32v_ble_central_wait_connected(timeout_ms: i32): i32
 
 @[cimport, codename("klin_gd32v_ble_central_disconnect")]
 fn klin_gd32v_ble_central_disconnect(): i32
+
+@[cimport, codename("klin_gd32v_ble_gattc_select")]
+fn klin_gd32v_ble_gattc_select(index: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_gattc_uuid16")]
+fn klin_gd32v_ble_gattc_uuid16(svc_uuid16: i32, chr_uuid16: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_gattc_uuid128")]
+fn klin_gd32v_ble_gattc_uuid128(svc16: *u8, chr16: *u8): i32
 
 @[cimport, codename("klin_gd32v_ble_gattc_discover")]
 fn klin_gd32v_ble_gattc_discover(timeout_ms: i32): i32
@@ -151,12 +191,12 @@ pub fn err_ok(): i32 {
     return 0
 }
 
-/// Active primary service UUID (16-bit) — default `0xFFF0` or last `gatt_uuid16`.
+/// Slot 0 service UUID16 (0 if 128-bit); default `0xFFF0` if table empty.
 pub fn gatt_svc_uuid16(): i32 {
     return klin_gd32v_ble_gatt_svc_uuid16()
 }
 
-/// Active characteristic UUID (16-bit) — default `0xFFF1` or last `gatt_uuid16`.
+/// Slot 0 characteristic UUID16 (0 if 128-bit); default `0xFFF1` if empty.
 pub fn gatt_chr_uuid16(): i32 {
     return klin_gd32v_ble_gatt_chr_uuid16()
 }
@@ -171,12 +211,38 @@ pub fn scan_max(): i32 {
     return 16
 }
 
-/// Set 16-bit svc/chr UUIDs. Must run **before** `init` (default `0xFFF0`/`0xFFF1`).
+/// Set 16-bit svc/chr on slot 0. Must run **before** `init`.
 pub fn gatt_uuid16(svc_uuid16: i32, chr_uuid16: i32): i32 {
     return klin_gd32v_ble_gatt_uuid16(svc_uuid16, chr_uuid16)
 }
 
-/// `ble_init` + `ble_wait_ready` + GATT svc add (once) + scan/conn callbacks.
+/// Set 128-bit svc/chr on slot 0 (16 bytes LE each). Before `init`.
+pub fn gatt_uuid128(svc16: *u8, chr16: *u8): i32 {
+    return klin_gd32v_ble_gatt_uuid128(svc16, chr16)
+}
+
+/// Append 16-bit svc/chr (max `gatt_svc_max()`). Before `init`.
+pub fn gatt_add_uuid16(svc_uuid16: i32, chr_uuid16: i32): i32 {
+    return klin_gd32v_ble_gatt_add_uuid16(svc_uuid16, chr_uuid16)
+}
+
+pub fn gatt_add_uuid128(svc16: *u8, chr16: *u8): i32 {
+    return klin_gd32v_ble_gatt_add_uuid128(svc16, chr16)
+}
+
+pub fn gatt_clear(): i32 {
+    return klin_gd32v_ble_gatt_clear()
+}
+
+pub fn gatt_svc_count(): i32 {
+    return klin_gd32v_ble_gatt_svc_count()
+}
+
+pub fn gatt_svc_max(): i32 {
+    return 4
+}
+
+/// `ble_init` + `ble_wait_ready` + GATT svc add + scan/conn callbacks.
 pub fn init(): i32 {
     return klin_gd32v_ble_init()
 }
@@ -210,28 +276,48 @@ pub fn stop(): i32 {
     return klin_gd32v_ble_stop()
 }
 
-/// Copy `len` bytes from `data` into the characteristic value (max `gatt_value_max()`).
+/// Copy `len` bytes from `data` into slot 0 (max `gatt_value_max()`).
 pub fn gatt_set(data: *u8, len: i32): i32 {
     return klin_gd32v_ble_gatt_set(data, len)
 }
 
-/// Copy current value into `out`. Returns byte count, or negative on error.
+pub fn gatt_set_at(index: i32, data: *u8, len: i32): i32 {
+    return klin_gd32v_ble_gatt_set_at(index, data, len)
+}
+
+/// Copy current slot-0 value into `out`. Returns byte count, or negative on error.
 pub fn gatt_get(out: *mut u8, max_len: i32): i32 {
     return klin_gd32v_ble_gatt_get(out, max_len)
+}
+
+pub fn gatt_get_at(index: i32, out: *mut u8, max_len: i32): i32 {
+    return klin_gd32v_ble_gatt_get_at(index, out, max_len)
 }
 
 pub fn gatt_len(): i32 {
     return klin_gd32v_ble_gatt_len()
 }
 
-/// Notify subscribed centrals (no-op if none).
+pub fn gatt_len_at(index: i32): i32 {
+    return klin_gd32v_ble_gatt_len_at(index)
+}
+
+/// Notify subscribed centrals on slot 0 (no-op if none).
 pub fn gatt_notify(): i32 {
     return klin_gd32v_ble_gatt_notify()
 }
 
-/// True if a central wrote since last poll (flag cleared).
+pub fn gatt_notify_at(index: i32): i32 {
+    return klin_gd32v_ble_gatt_notify_at(index)
+}
+
+/// True if a central wrote slot 0 since last poll (flag cleared).
 pub fn gatt_written(): bool {
     return klin_gd32v_ble_gatt_written() != 0
+}
+
+pub fn gatt_written_at(index: i32): bool {
+    return klin_gd32v_ble_gatt_written_at(index) != 0
 }
 
 /// Blocking active scan for `duration_ms`. Stops advertising first.
@@ -282,7 +368,20 @@ pub fn central_disconnect(): i32 {
     return klin_gd32v_ble_central_disconnect()
 }
 
-/// Discover peer svc 0xFFF0 / chr 0xFFF1 (+ CCCD if present). Blocks.
+/// Use server-table slot `index` UUIDs for the next `gattc_discover`.
+pub fn gattc_select(index: i32): i32 {
+    return klin_gd32v_ble_gattc_select(index)
+}
+
+pub fn gattc_uuid16(svc_uuid16: i32, chr_uuid16: i32): i32 {
+    return klin_gd32v_ble_gattc_uuid16(svc_uuid16, chr_uuid16)
+}
+
+pub fn gattc_uuid128(svc16: *u8, chr16: *u8): i32 {
+    return klin_gd32v_ble_gattc_uuid128(svc16, chr16)
+}
+
+/// Discover peer svc/chr (blocking).
 pub fn gattc_discover(timeout_ms: i32): i32 {
     return klin_gd32v_ble_gattc_discover(timeout_ms)
 }

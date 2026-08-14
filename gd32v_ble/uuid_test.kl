@@ -4,6 +4,7 @@ import testing
 
 fn test_gatt_uuid16_before_init() {
     testing.assert_eq_i32(stop(), 0)
+    testing.assert_eq_i32(gatt_clear(), 0)
     testing.assert_eq_i32(gatt_uuid16(0xA001, 0xA002), 0)
     testing.assert_eq_i32(gatt_svc_uuid16(), 0xA001)
     testing.assert_eq_i32(gatt_chr_uuid16(), 0xA002)
@@ -18,6 +19,7 @@ fn test_gatt_uuid16_before_init() {
 
 fn test_gatt_uuid16_rejects_bad_range() {
     testing.assert_eq_i32(stop(), 0)
+    testing.assert_eq_i32(gatt_clear(), 0)
     testing.assert_eq_i32(gatt_uuid16(0, 0xA002), 0 - 1)
     testing.assert_eq_i32(gatt_uuid16(0xA001, 0), 0 - 1)
     testing.assert_eq_i32(gatt_uuid16(0 - 1, 0xA002), 0 - 1)

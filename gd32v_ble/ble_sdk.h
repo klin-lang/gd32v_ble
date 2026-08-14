@@ -2,7 +2,11 @@
  * Klin over the GigaDevice VW55x BLE SDK. Heap / OSAL BLE task / GAP / GATTS /
  * GATTC / security / scan events are SDK contracts (not Klin magic).
  *
- * `@v0.7.0` = … + fixed passkey/PIN bonding (`bond_passkey`, MITM).
+ * `@v0.8.0` = … + 128-bit UUID + up to 4 services (`gatt_add_*` / `gatt_*_at`).
+ * Peripheral GATT: up to KLIN_GD32V_BLE_GATT_SVC_MAX services (1 chr each),
+ * 16-bit or 128-bit UUIDs via gatt_uuid* / gatt_add_* before init.
+ * Default single svc 0xFFF0 / chr 0xFFF1 when unset.
+ * Central: scan + connect + gattc_discover (slot select or gattc_uuid*).
  * Scan results use a fixed table (max 16) — no Klin / glue malloc.
  * Central / GATT client / bonding need an SDK build with those roles (e.g. msdk_ffd).
  */
@@ -13,7 +17,8 @@ extern "C" {
 #endif
 
 #define KLIN_GD32V_BLE_GATT_VALUE_MAX 20
-/** Default primary service UUID16 (override with `klin_gd32v_ble_gatt_uuid16`). */
+#define KLIN_GD32V_BLE_GATT_SVC_MAX 4
+/** Default primary service UUID16 (when table empty at init). */
 #define KLIN_GD32V_BLE_GATT_SVC_UUID16 0xFFF0
 /** Default characteristic UUID16. */
 #define KLIN_GD32V_BLE_GATT_CHR_UUID16 0xFFF1
@@ -24,15 +29,21 @@ extern "C" {
 /** Max GAP name bytes stored per scan result (NUL-terminated in C). */
 #define KLIN_GD32V_BLE_SCAN_NAME_MAX 28
 
-/**
- * Set 16-bit svc/chr UUIDs for the peripheral GATT DB and `gattc_discover`.
- * Must be called before `init`. Default remains 0xFFF0 / 0xFFF1.
- * Returns 0 on OK, -1 on bad range or already inited.
- */
+/** Replace slot 0 with 16-bit svc/chr. Before `init`. */
 int klin_gd32v_ble_gatt_uuid16(int svc_uuid16, int chr_uuid16);
-/** Active service UUID16 (default or last `gatt_uuid16`). */
+/** Replace slot 0 with 128-bit svc/chr (16 bytes LE each). Before `init`. */
+int klin_gd32v_ble_gatt_uuid128(const unsigned char *svc16, const unsigned char *chr16);
+/** Append 16-bit svc/chr (max KLIN_GD32V_BLE_GATT_SVC_MAX). Before `init`. */
+int klin_gd32v_ble_gatt_add_uuid16(int svc_uuid16, int chr_uuid16);
+/** Append 128-bit svc/chr. Before `init`. */
+int klin_gd32v_ble_gatt_add_uuid128(const unsigned char *svc16, const unsigned char *chr16);
+/** Clear service table (must add before init). */
+int klin_gd32v_ble_gatt_clear(void);
+/** Number of configured services (1 default before any calls). */
+int klin_gd32v_ble_gatt_svc_count(void);
+/** Slot 0 service UUID16, or 0 if 128-bit; default FFF0 if empty. */
 int klin_gd32v_ble_gatt_svc_uuid16(void);
-/** Active characteristic UUID16. */
+/** Slot 0 characteristic UUID16, or 0 if 128-bit; default FFF1 if empty. */
 int klin_gd32v_ble_gatt_chr_uuid16(void);
 
 /** `ble_init(true)` + `ble_wait_ready` + GATT svc add + scan/conn/gattc. */
@@ -48,10 +59,15 @@ int klin_gd32v_ble_wait_connected(int timeout_ms);
 int klin_gd32v_ble_stop(void);
 
 int klin_gd32v_ble_gatt_set(const unsigned char *data, int len);
+int klin_gd32v_ble_gatt_set_at(int index, const unsigned char *data, int len);
 int klin_gd32v_ble_gatt_get(unsigned char *out, int max_len);
+int klin_gd32v_ble_gatt_get_at(int index, unsigned char *out, int max_len);
 int klin_gd32v_ble_gatt_len(void);
+int klin_gd32v_ble_gatt_len_at(int index);
 int klin_gd32v_ble_gatt_notify(void);
+int klin_gd32v_ble_gatt_notify_at(int index);
 int klin_gd32v_ble_gatt_written(void);
+int klin_gd32v_ble_gatt_written_at(int index);
 
 /**
  * Stop advertising (if any), clear results, run active scan for `duration_ms`
@@ -74,8 +90,15 @@ int klin_gd32v_ble_central_connected(void);
 int klin_gd32v_ble_central_wait_connected(int timeout_ms);
 int klin_gd32v_ble_central_disconnect(void);
 
+/** Select local slot UUID for `gattc_discover`. */
+int klin_gd32v_ble_gattc_select(int index);
+/** Override discover target (16-bit), independent of server table. */
+int klin_gd32v_ble_gattc_uuid16(int svc_uuid16, int chr_uuid16);
+/** Override discover target (128-bit, 16 bytes LE each). */
+int klin_gd32v_ble_gattc_uuid128(const unsigned char *svc16, const unsigned char *chr16);
+
 /**
- * Discover peer svc/chr from active UUID16 (+ CCCD if present). Blocks.
+ * Discover peer svc/chr from selected/override UUID (+ CCCD if present). Blocks.
  * Requires an active central connection. 0 = ready for read/write.
  */
 int klin_gd32v_ble_gattc_discover(int timeout_ms);

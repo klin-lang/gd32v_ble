@@ -1,8 +1,9 @@
 # gd32v_ble
 
 Thin **GigaDevice VW55x BLE** bindings for [Klin](https://github.com/klin-lang/klin)
-(**peripheral advertise** + **GATT server MVP** + **central scan/connect** +
-**GATT client** + **Just Works bonding** + **custom UUID16** + **passkey/PIN**).
+(**peripheral advertise** + **GATT server** + **central scan/connect** +
+**GATT client** + **Just Works bonding** + **custom UUID16/128** + **multi-service**
++ **passkey/PIN**).
 
 The radio is in the **silicon**; this package does **not** belong in
 [`machine_gd32v`](https://github.com/klin-lang/machine_gd32v) (MMIO Pin…Adc).
@@ -22,19 +23,18 @@ not hidden Klin allocation.
 Wi‑Fi is [`gd32v_wifi`](https://github.com/klin-lang/gd32v_wifi). Do **not**
 put BLE in a board pack.
 
-## Status (`@v0.7.0`)
+## Status (`@v0.8.0`)
 
 | API | Notes |
 |---|---|
-| `bond_passkey(pin)` | Fixed **6-digit PIN** (`0..=999999`) — MITM + keyboard/display (`app_sec_set_authen` + `app_sec_pin_code_set`) |
-| `passkey` / `passkey_action` / `passkey_inject` | Query / last action / manual inject |
-| `bond_enable` | Just Works (clears passkey mode) |
-| `init` … `gatt_uuid16` … `bond_*` | Same as `@v0.6.0` + passkey |
+| `gatt_uuid16` / `gatt_uuid128` | Slot 0 UUIDs before `init` (16 bytes LE for 128-bit) |
+| `gatt_add_uuid16` / `gatt_add_uuid128` / `gatt_clear` | Up to **4** services (1 chr each) |
+| `gatt_set_at` / `gatt_get_at` / `gatt_len_at` / `gatt_notify_at` / `gatt_written_at` | Per-service index |
+| `gattc_select` / `gattc_uuid16` / `gattc_uuid128` | Client discover target |
+| `bond_passkey` / `bond_enable` / … | Same as `@v0.7.0` |
 | `err_ok` | 0 |
 
-`version()` → `7`.
-
-`bond_enable` = Just Works; `bond_passkey` = MITM + PIN (replaces JW config).
+`version()` → `8`. Default remains svc **0xFFF0** / chr **0xFFF1** when unset.
 
 Host `klin test` uses stubs when `ble_init.h` is not on the include path
 (`__has_include`). Do **not** call the factory-style init on a host and expect
@@ -43,7 +43,8 @@ RF.
 **Central / GATT client / bonding** need a GigaDevice BLE image with those
 roles (e.g. **msdk_ffd**).
 
-Privacy / UUID128 later (issue 140).
+Advertise does **not** pack a service UUID list into AD (GD32 `app_adv_create`
+name-only path) — intentional deviation from `esp_ble` AD UUID fields.
 
 ## Requirements
 
@@ -51,38 +52,37 @@ Privacy / UUID128 later (issue 140).
 - Official SDK on the include/link path to build a board ELF
 - AN152 BLE Development Guide (GigaDevice)
 
-## Usage (passkey / PIN)
+## Usage (128-bit + multi-service)
 
 ```klin
 import "github/klin-lang/gd32v_ble" ble
 
 fn main() {
-    let mut e = ble.init()
+    let mut e = ble.gatt_clear()
     if e != ble.err_ok() {
         return
     }
-    e = ble.bond_passkey(123456)
+    e = ble.gatt_add_uuid16(0xA001, 0xA002)
     if e != ble.err_ok() {
         return
     }
-    e = ble.advertise("klin-pin")
+    let mut svc: [16]u8
+    let mut chr: [16]u8
+    // fill LE 128-bit UUIDs…
+    e = ble.gatt_add_uuid128(cast(*u8, &svc[0]), cast(*u8, &chr[0]))
     if e != ble.err_ok() {
         return
     }
-    e = ble.wait_connected(-1)
+    e = ble.init()
     if e != ble.err_ok() {
         return
     }
-    e = ble.bond_start()
-    if e != ble.err_ok() {
-        return
-    }
-    e = ble.wait_bonded(60000)
+    e = ble.advertise("klin-multi")
 }
 ```
 
 ```sh
-klin get github/klin-lang/gd32v_ble@v0.7.0
+klin get github/klin-lang/gd32v_ble@v0.8.0
 ```
 
 ## Tests

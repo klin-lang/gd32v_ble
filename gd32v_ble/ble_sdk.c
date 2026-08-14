@@ -1,5 +1,5 @@
-/* BLE advertise + GATT + central scan + GATT client + bonding + custom UUID16
- * + passkey for Klin on GD32VW553. Real path: GigaDevice VW55x Wi-Fi BLE SDK
+/* BLE advertise + GATT + central scan + GATT client + bonding + UUID128 +
+ * multi-service for Klin on GD32VW553. Real path: GigaDevice VW55x Wi-Fi BLE SDK
  * (AN152 `ble_init` / `app_adv_*` / `ble_gatts_*` / `ble_scan_*` / `ble_conn_*`
  * / `ble_gattc_*` / `app_sec_*`). Host path: stubs when SDK headers are not on
  * the include path.
@@ -40,6 +40,9 @@
 #endif
 #endif
 
+#define KLIN_GD32V_BLE_UUID_KIND_16  16
+#define KLIN_GD32V_BLE_UUID_KIND_128 128
+
 typedef struct {
     unsigned char addr[6];
     unsigned char addr_type;
@@ -47,16 +50,28 @@ typedef struct {
     char name[KLIN_GD32V_BLE_SCAN_NAME_MAX];
 } klin_gd32v_ble_scan_row_t;
 
+typedef struct {
+    uint8_t kind; /* 16 or 128 */
+    uint16_t svc16;
+    uint16_t chr16;
+    uint8_t svc128[16];
+    uint8_t chr128[16];
+    unsigned char value[KLIN_GD32V_BLE_GATT_VALUE_MAX];
+    int value_len;
+    int written;
+#ifdef KLIN_GD32V_BLE_HAVE_SDK
+    uint8_t svc_id;
+    uint16_t cccd;
+    int added;
+#endif
+} klin_gd32v_ble_gatt_slot_t;
+
 static int s_inited;
 static int s_advertising;
 static int s_connected;
 static int s_scanning;
 static int s_central_connected;
 static int s_central_conn_idx;
-
-static unsigned char s_gatt_value[KLIN_GD32V_BLE_GATT_VALUE_MAX];
-static int s_gatt_len;
-static int s_gatt_written;
 
 static klin_gd32v_ble_scan_row_t s_scan[KLIN_GD32V_BLE_SCAN_MAX];
 static int s_scan_count;
@@ -80,9 +95,18 @@ static uint32_t s_passkey;
 static int s_passkey_action; /* 0 / 2=input / 3=disp / 4=numcmp */
 static uint8_t s_passkey_conn_idx;
 
-/* Mutable: set via gatt_uuid16() before init (server DB + gattc discover). */
-static uint16_t s_svc_uuid16 = (uint16_t)KLIN_GD32V_BLE_GATT_SVC_UUID16;
-static uint16_t s_chr_uuid16 = (uint16_t)KLIN_GD32V_BLE_GATT_CHR_UUID16;
+/* Server GATT table (max KLIN_GD32V_BLE_GATT_SVC_MAX). Built before init. */
+static klin_gd32v_ble_gatt_slot_t s_slots[KLIN_GD32V_BLE_GATT_SVC_MAX];
+static int s_slot_count;
+
+/* Client discover target (defaults to slot 0 / override via gattc_uuid*). */
+static int s_gattc_sel;
+static int s_gattc_override;
+static uint8_t s_gattc_kind;
+static uint16_t s_gattc_svc16;
+static uint16_t s_gattc_chr16;
+static uint8_t s_gattc_svc128[16];
+static uint8_t s_gattc_chr128[16];
 
 static void klin_gd32v_ble_scan_clear(void)
 {
@@ -117,6 +141,37 @@ static void klin_gd32v_ble_passkey_reset(void)
     s_passkey_conn_idx = 0;
 }
 
+static void klin_gd32v_ble_slots_ensure_default(void)
+{
+    if (s_slot_count > 0) {
+        return;
+    }
+    memset(&s_slots[0], 0, sizeof(s_slots[0]));
+    s_slots[0].kind = KLIN_GD32V_BLE_UUID_KIND_16;
+    s_slots[0].svc16 = (uint16_t)KLIN_GD32V_BLE_GATT_SVC_UUID16;
+    s_slots[0].chr16 = (uint16_t)KLIN_GD32V_BLE_GATT_CHR_UUID16;
+    s_slot_count = 1;
+}
+
+static void klin_gd32v_ble_gatt_values_reset(void)
+{
+    int i;
+
+    for (i = 0; i < KLIN_GD32V_BLE_GATT_SVC_MAX; i++) {
+        s_slots[i].value_len = 0;
+        s_slots[i].written = 0;
+        memset(s_slots[i].value, 0, sizeof(s_slots[i].value));
+#ifdef KLIN_GD32V_BLE_HAVE_SDK
+        s_slots[i].cccd = 0;
+#endif
+    }
+}
+
+static int klin_gd32v_ble_slot_limit(void)
+{
+    return s_slot_count > 0 ? s_slot_count : 1;
+}
+
 #ifdef KLIN_GD32V_BLE_HAVE_SDK
 
 enum {
@@ -127,34 +182,14 @@ enum {
     KLIN_GATT_IDX_NB
 };
 
-static uint8_t s_svc_id;
 static uint8_t s_conn_idx;
-static uint16_t s_cccd;
-static int s_gatt_added;
 static int s_scan_cb_reg;
 static int s_conn_cb_reg;
 static int s_gattc_svc_reg;
+static ble_uuid_t s_gattc_reg_uuid;
 
-static uint8_t s_svc_uuid[2] = UUID_16BIT_TO_ARRAY(KLIN_GD32V_BLE_GATT_SVC_UUID16);
-
-static ble_gatt_attr_desc_t s_gatt_db[KLIN_GATT_IDX_NB] = {
-    [KLIN_GATT_IDX_SVC] = {UUID_16BIT_TO_ARRAY(BLE_GATT_DECL_PRIMARY_SERVICE), PROP(RD), 0},
-    [KLIN_GATT_IDX_CHAR] = {UUID_16BIT_TO_ARRAY(BLE_GATT_DECL_CHARACTERISTIC), PROP(RD), 0},
-    [KLIN_GATT_IDX_VAL] = {UUID_16BIT_TO_ARRAY(KLIN_GD32V_BLE_GATT_CHR_UUID16),
-                           PROP(RD) | PROP(WR) | PROP(NTF),
-                           OPT(NO_OFFSET) | KLIN_GD32V_BLE_GATT_VALUE_MAX},
-    [KLIN_GATT_IDX_CCCD] = {UUID_16BIT_TO_ARRAY(BLE_GATT_DESC_CLIENT_CHAR_CFG),
-                            PROP(RD) | PROP(WR), OPT(NO_OFFSET)},
-};
-
-static void klin_gd32v_ble_apply_uuids(void)
-{
-    s_svc_uuid[0] = (uint8_t)(s_svc_uuid16 & 0xff);
-    s_svc_uuid[1] = (uint8_t)((s_svc_uuid16 >> 8) & 0xff);
-    memset(s_gatt_db[KLIN_GATT_IDX_VAL].uuid, 0, sizeof(s_gatt_db[KLIN_GATT_IDX_VAL].uuid));
-    s_gatt_db[KLIN_GATT_IDX_VAL].uuid[0] = (uint8_t)(s_chr_uuid16 & 0xff);
-    s_gatt_db[KLIN_GATT_IDX_VAL].uuid[1] = (uint8_t)((s_chr_uuid16 >> 8) & 0xff);
-}
+static ble_gatt_attr_desc_t s_gatt_db[KLIN_GD32V_BLE_GATT_SVC_MAX][KLIN_GATT_IDX_NB];
+static uint8_t s_svc_uuid_bytes[KLIN_GD32V_BLE_GATT_SVC_MAX][16];
 
 static void klin_gd32v_ble_sleep_ms(int ms)
 {
@@ -167,6 +202,140 @@ static void klin_gd32v_ble_sleep_ms(int ms)
     (void)ms;
     (void)i;
 #endif
+}
+
+static int klin_gd32v_ble_slot_by_svc_id(uint8_t svc_id)
+{
+    int i;
+
+    for (i = 0; i < s_slot_count; i++) {
+        if (s_slots[i].added && s_slots[i].svc_id == svc_id) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void klin_gd32v_ble_fill_attr_db(int idx)
+{
+    ble_gatt_attr_desc_t *db;
+    uint16_t info;
+
+    db = s_gatt_db[idx];
+    memset(db, 0, sizeof(s_gatt_db[idx]));
+    memset(s_svc_uuid_bytes[idx], 0, 16);
+
+    db[KLIN_GATT_IDX_SVC].uuid[0] = (uint8_t)(BLE_GATT_DECL_PRIMARY_SERVICE & 0xff);
+    db[KLIN_GATT_IDX_SVC].uuid[1] = (uint8_t)((BLE_GATT_DECL_PRIMARY_SERVICE >> 8) & 0xff);
+    db[KLIN_GATT_IDX_SVC].info = PROP(RD);
+    db[KLIN_GATT_IDX_SVC].ext_info = 0;
+
+    db[KLIN_GATT_IDX_CHAR].uuid[0] = (uint8_t)(BLE_GATT_DECL_CHARACTERISTIC & 0xff);
+    db[KLIN_GATT_IDX_CHAR].uuid[1] = (uint8_t)((BLE_GATT_DECL_CHARACTERISTIC >> 8) & 0xff);
+    db[KLIN_GATT_IDX_CHAR].info = PROP(RD);
+    db[KLIN_GATT_IDX_CHAR].ext_info = 0;
+
+    info = (uint16_t)(PROP(RD) | PROP(WR) | PROP(NTF));
+    if (s_slots[idx].kind == KLIN_GD32V_BLE_UUID_KIND_128) {
+        memcpy(s_svc_uuid_bytes[idx], s_slots[idx].svc128, 16);
+        memcpy(db[KLIN_GATT_IDX_VAL].uuid, s_slots[idx].chr128, 16);
+        info = (uint16_t)(info | ATT_UUID(128));
+    } else {
+        s_svc_uuid_bytes[idx][0] = (uint8_t)(s_slots[idx].svc16 & 0xff);
+        s_svc_uuid_bytes[idx][1] = (uint8_t)((s_slots[idx].svc16 >> 8) & 0xff);
+        db[KLIN_GATT_IDX_VAL].uuid[0] = (uint8_t)(s_slots[idx].chr16 & 0xff);
+        db[KLIN_GATT_IDX_VAL].uuid[1] = (uint8_t)((s_slots[idx].chr16 >> 8) & 0xff);
+    }
+    db[KLIN_GATT_IDX_VAL].info = info;
+    db[KLIN_GATT_IDX_VAL].ext_info = (uint16_t)(OPT(NO_OFFSET) | KLIN_GD32V_BLE_GATT_VALUE_MAX);
+
+    db[KLIN_GATT_IDX_CCCD].uuid[0] = (uint8_t)(BLE_GATT_DESC_CLIENT_CHAR_CFG & 0xff);
+    db[KLIN_GATT_IDX_CCCD].uuid[1] = (uint8_t)((BLE_GATT_DESC_CLIENT_CHAR_CFG >> 8) & 0xff);
+    db[KLIN_GATT_IDX_CCCD].info = (uint16_t)(PROP(RD) | PROP(WR));
+    db[KLIN_GATT_IDX_CCCD].ext_info = OPT(NO_OFFSET);
+}
+
+static void klin_gd32v_ble_fill_uuid_from_target(ble_uuid_t *u, int want_svc)
+{
+    uint8_t kind;
+    uint16_t u16;
+    const uint8_t *u128;
+
+    memset(u, 0, sizeof(*u));
+    if (s_gattc_override) {
+        kind = s_gattc_kind;
+        if (want_svc) {
+            u16 = s_gattc_svc16;
+            u128 = s_gattc_svc128;
+        } else {
+            u16 = s_gattc_chr16;
+            u128 = s_gattc_chr128;
+        }
+    } else {
+        klin_gd32v_ble_slots_ensure_default();
+        if (s_gattc_sel < 0 || s_gattc_sel >= s_slot_count) {
+            kind = KLIN_GD32V_BLE_UUID_KIND_16;
+            u16 = want_svc ? (uint16_t)KLIN_GD32V_BLE_GATT_SVC_UUID16
+                           : (uint16_t)KLIN_GD32V_BLE_GATT_CHR_UUID16;
+            u128 = NULL;
+        } else {
+            kind = s_slots[s_gattc_sel].kind;
+            if (want_svc) {
+                u16 = s_slots[s_gattc_sel].svc16;
+                u128 = s_slots[s_gattc_sel].svc128;
+            } else {
+                u16 = s_slots[s_gattc_sel].chr16;
+                u128 = s_slots[s_gattc_sel].chr128;
+            }
+        }
+    }
+    if (kind == KLIN_GD32V_BLE_UUID_KIND_128 && u128 != NULL) {
+        u->type = BLE_UUID_TYPE_128;
+        memcpy(u->data.uuid_128, u128, 16);
+    } else {
+        u->type = BLE_UUID_TYPE_16;
+        u->data.uuid_16 = u16;
+    }
+}
+
+static void klin_gd32v_ble_gattc_unreg(void)
+{
+    if (!s_gattc_svc_reg) {
+        return;
+    }
+    (void)ble_gattc_svc_unreg(&s_gattc_reg_uuid);
+    s_gattc_svc_reg = 0;
+    memset(&s_gattc_reg_uuid, 0, sizeof(s_gattc_reg_uuid));
+}
+
+/* Forward decls for callbacks used before definition. */
+static ble_status_t klin_gd32v_ble_gattc_cb(ble_gattc_msg_info_t *info);
+static ble_status_t klin_gd32v_ble_gatt_cb(ble_gatts_msg_info_t *info);
+
+static int klin_gd32v_ble_gattc_ensure_reg_cb(void)
+{
+    ble_uuid_t u;
+
+    klin_gd32v_ble_fill_uuid_from_target(&u, 1);
+    if (s_gattc_svc_reg) {
+        if (s_gattc_reg_uuid.type == u.type) {
+            if (u.type == BLE_UUID_TYPE_16 &&
+                s_gattc_reg_uuid.data.uuid_16 == u.data.uuid_16) {
+                return 0;
+            }
+            if (u.type == BLE_UUID_TYPE_128 &&
+                memcmp(s_gattc_reg_uuid.data.uuid_128, u.data.uuid_128, 16) == 0) {
+                return 0;
+            }
+        }
+        klin_gd32v_ble_gattc_unreg();
+    }
+    if (ble_gattc_svc_reg(&u, klin_gd32v_ble_gattc_cb) == BLE_ERR_NO_ERROR) {
+        s_gattc_reg_uuid = u;
+        s_gattc_svc_reg = 1;
+        return 0;
+    }
+    return -1;
 }
 
 /* AD types: 0x08 short local name, 0x09 complete local name. */
@@ -353,11 +522,9 @@ static int klin_gd32v_ble_gattc_resolve_handles(void)
     memset(&chr, 0, sizeof(chr));
     memset(&desc, 0, sizeof(desc));
     svc.instance_id = 0;
-    svc.ble_uuid.type = BLE_UUID_TYPE_16;
-    svc.ble_uuid.data.uuid_16 = s_svc_uuid16;
     chr.instance_id = 0;
-    chr.ble_uuid.type = BLE_UUID_TYPE_16;
-    chr.ble_uuid.data.uuid_16 = s_chr_uuid16;
+    klin_gd32v_ble_fill_uuid_from_target(&svc.ble_uuid, 1);
+    klin_gd32v_ble_fill_uuid_from_target(&chr.ble_uuid, 0);
 
     handle = 0;
     if (ble_gattc_find_char_handle((uint8_t)s_central_conn_idx, &svc, &chr,
@@ -403,7 +570,9 @@ static ble_status_t klin_gd32v_ble_gatt_cb(ble_gatts_msg_info_t *info)
     ble_gatts_op_info_t *op;
     ble_gatts_read_req_t *rd;
     ble_gatts_write_req_t *wr;
+    int slot;
     int n;
+    int i;
 
     if (info == NULL) {
         return BLE_ERR_NO_ERROR;
@@ -415,10 +584,14 @@ static ble_status_t klin_gd32v_ble_gatt_cb(ble_gatts_msg_info_t *info)
             s_connected = 1;
             s_advertising = 0;
             s_conn_idx = ind->info.conn_info.conn_idx;
-            s_cccd = 0;
+            for (i = 0; i < s_slot_count; i++) {
+                s_slots[i].cccd = 0;
+            }
         } else if (ind->conn_state == BLE_CONN_STATE_DISCONNECTD) {
             s_connected = 0;
-            s_cccd = 0;
+            for (i = 0; i < s_slot_count; i++) {
+                s_slots[i].cccd = 0;
+            }
             klin_gd32v_ble_bond_link_reset();
         }
         return BLE_ERR_NO_ERROR;
@@ -431,26 +604,30 @@ static ble_status_t klin_gd32v_ble_gatt_cb(ble_gatts_msg_info_t *info)
     op = &info->msg_data.gatts_op_info;
     if (op->gatts_op_sub_evt == BLE_SRV_EVT_READ_REQ) {
         rd = &op->gatts_op_data.read_req;
+        slot = klin_gd32v_ble_slot_by_svc_id(rd->svc_id);
+        if (slot < 0) {
+            return BLE_ERR_NO_ERROR;
+        }
         if (rd->att_idx == KLIN_GATT_IDX_VAL) {
-            if (rd->offset > (uint16_t)s_gatt_len) {
+            if (rd->offset > (uint16_t)s_slots[slot].value_len) {
                 rd->val_len = 0;
-                rd->att_len = (uint16_t)s_gatt_len;
+                rd->att_len = (uint16_t)s_slots[slot].value_len;
                 return BLE_ERR_NO_ERROR;
             }
-            n = s_gatt_len - (int)rd->offset;
+            n = s_slots[slot].value_len - (int)rd->offset;
             if (n > (int)rd->max_len) {
                 n = (int)rd->max_len;
             }
             rd->val_len = (uint16_t)n;
-            rd->att_len = (uint16_t)s_gatt_len;
+            rd->att_len = (uint16_t)s_slots[slot].value_len;
             if (rd->p_val != NULL && n > 0) {
-                memcpy(rd->p_val, s_gatt_value + rd->offset, (size_t)n);
+                memcpy(rd->p_val, s_slots[slot].value + rd->offset, (size_t)n);
             }
         } else if (rd->att_idx == KLIN_GATT_IDX_CCCD) {
             rd->val_len = BLE_GATT_CCCD_LEN;
             rd->att_len = BLE_GATT_CCCD_LEN;
             if (rd->p_val != NULL) {
-                memcpy(rd->p_val, &s_cccd, BLE_GATT_CCCD_LEN);
+                memcpy(rd->p_val, &s_slots[slot].cccd, BLE_GATT_CCCD_LEN);
             }
         }
         return BLE_ERR_NO_ERROR;
@@ -458,16 +635,20 @@ static ble_status_t klin_gd32v_ble_gatt_cb(ble_gatts_msg_info_t *info)
 
     if (op->gatts_op_sub_evt == BLE_SRV_EVT_WRITE_REQ) {
         wr = &op->gatts_op_data.write_req;
+        slot = klin_gd32v_ble_slot_by_svc_id(wr->svc_id);
+        if (slot < 0) {
+            return BLE_ERR_NO_ERROR;
+        }
         if (wr->att_idx == KLIN_GATT_IDX_VAL) {
             if (wr->p_val == NULL || wr->val_len > KLIN_GD32V_BLE_GATT_VALUE_MAX) {
                 return BLE_ERR_NO_ERROR;
             }
-            memcpy(s_gatt_value, wr->p_val, wr->val_len);
-            s_gatt_len = (int)wr->val_len;
-            s_gatt_written = 1;
+            memcpy(s_slots[slot].value, wr->p_val, wr->val_len);
+            s_slots[slot].value_len = (int)wr->val_len;
+            s_slots[slot].written = 1;
         } else if (wr->att_idx == KLIN_GATT_IDX_CCCD) {
             if (wr->p_val != NULL && wr->val_len == BLE_GATT_CCCD_LEN) {
-                memcpy(&s_cccd, wr->p_val, BLE_GATT_CCCD_LEN);
+                memcpy(&s_slots[slot].cccd, wr->p_val, BLE_GATT_CCCD_LEN);
             }
         }
     }
@@ -475,38 +656,39 @@ static ble_status_t klin_gd32v_ble_gatt_cb(ble_gatts_msg_info_t *info)
     return BLE_ERR_NO_ERROR;
 }
 
-static void klin_gd32v_ble_gatt_reset(void)
-{
-    s_gatt_len = 0;
-    s_gatt_written = 0;
-    s_cccd = 0;
-    memset(s_gatt_value, 0, sizeof(s_gatt_value));
-}
-
 int klin_gd32v_ble_init(void)
 {
-    ble_uuid_t svc_uuid;
+    int i;
+    uint8_t svc_info;
 
     if (s_inited) {
         return 0;
     }
+    klin_gd32v_ble_slots_ensure_default();
     ble_init(1);
     if (ble_wait_ready() != 0) {
         return -1;
     }
-    klin_gd32v_ble_apply_uuids();
-    if (ble_gatts_svc_add(&s_svc_id, s_svc_uuid, 0, SVC_UUID(16), s_gatt_db,
-                          KLIN_GATT_IDX_NB, klin_gd32v_ble_gatt_cb) != BLE_ERR_NO_ERROR) {
-        ble_deinit();
-        return -1;
+    for (i = 0; i < s_slot_count; i++) {
+        klin_gd32v_ble_fill_attr_db(i);
+        svc_info = (s_slots[i].kind == KLIN_GD32V_BLE_UUID_KIND_128) ? SVC_UUID(128)
+                                                                     : SVC_UUID(16);
+        if (ble_gatts_svc_add(&s_slots[i].svc_id, s_svc_uuid_bytes[i], 0, svc_info,
+                              s_gatt_db[i], KLIN_GATT_IDX_NB,
+                              klin_gd32v_ble_gatt_cb) != BLE_ERR_NO_ERROR) {
+            while (i > 0) {
+                i--;
+                if (s_slots[i].added) {
+                    (void)ble_gatts_svc_rmv(s_slots[i].svc_id);
+                    s_slots[i].added = 0;
+                }
+            }
+            ble_deinit();
+            return -1;
+        }
+        s_slots[i].added = 1;
     }
-    s_gatt_added = 1;
-    memset(&svc_uuid, 0, sizeof(svc_uuid));
-    svc_uuid.type = BLE_UUID_TYPE_16;
-    svc_uuid.data.uuid_16 = s_svc_uuid16;
-    if (ble_gattc_svc_reg(&svc_uuid, klin_gd32v_ble_gattc_cb) == BLE_ERR_NO_ERROR) {
-        s_gattc_svc_reg = 1;
-    }
+    (void)klin_gd32v_ble_gattc_ensure_reg_cb();
     if (ble_scan_callback_register(klin_gd32v_ble_scan_cb) == BLE_ERR_NO_ERROR) {
         s_scan_cb_reg = 1;
     }
@@ -514,7 +696,7 @@ int klin_gd32v_ble_init(void)
         s_conn_cb_reg = 1;
     }
     s_inited = 1;
-    klin_gd32v_ble_gatt_reset();
+    klin_gd32v_ble_gatt_values_reset();
     klin_gd32v_ble_gattc_reset();
     klin_gd32v_ble_bond_link_reset();
     klin_gd32v_ble_passkey_reset();
@@ -591,7 +773,7 @@ int klin_gd32v_ble_wait_connected(int timeout_ms)
 
 int klin_gd32v_ble_stop(void)
 {
-    ble_uuid_t svc_uuid;
+    int i;
 
     (void)klin_gd32v_ble_scan_stop();
     (void)klin_gd32v_ble_central_disconnect();
@@ -604,22 +786,18 @@ int klin_gd32v_ble_stop(void)
         (void)ble_conn_callback_unregister(klin_gd32v_ble_conn_cb);
         s_conn_cb_reg = 0;
     }
-    if (s_gattc_svc_reg) {
-        memset(&svc_uuid, 0, sizeof(svc_uuid));
-        svc_uuid.type = BLE_UUID_TYPE_16;
-        svc_uuid.data.uuid_16 = s_svc_uuid16;
-        (void)ble_gattc_svc_unreg(&svc_uuid);
-        s_gattc_svc_reg = 0;
-    }
-    if (s_gatt_added) {
-        (void)ble_gatts_svc_rmv(s_svc_id);
-        s_gatt_added = 0;
+    klin_gd32v_ble_gattc_unreg();
+    for (i = 0; i < s_slot_count; i++) {
+        if (s_slots[i].added) {
+            (void)ble_gatts_svc_rmv(s_slots[i].svc_id);
+            s_slots[i].added = 0;
+        }
     }
     s_connected = 0;
     s_central_connected = 0;
     s_inited = 0;
     s_bond_enabled = 0;
-    klin_gd32v_ble_gatt_reset();
+    klin_gd32v_ble_gatt_values_reset();
     klin_gd32v_ble_gattc_reset();
     klin_gd32v_ble_bond_link_reset();
     klin_gd32v_ble_passkey_reset();
@@ -628,16 +806,31 @@ int klin_gd32v_ble_stop(void)
     return 0;
 }
 
-int klin_gd32v_ble_gatt_notify(void)
+int klin_gd32v_ble_gatt_notify_at(int index)
 {
-    if (!s_inited || !s_connected || (s_cccd & BLE_GATT_CCCD_NTF_BIT) == 0) {
+    if (!s_inited) {
+        return -1;
+    }
+    if (index < 0 || index >= s_slot_count) {
+        return -1;
+    }
+    if (!s_connected || (s_slots[index].cccd & BLE_GATT_CCCD_NTF_BIT) == 0) {
         return 0;
     }
-    if (ble_gatts_ntf_ind_send(s_conn_idx, s_svc_id, KLIN_GATT_IDX_VAL, s_gatt_value,
-                               (uint16_t)s_gatt_len, BLE_GATT_NOTIFY) != BLE_ERR_NO_ERROR) {
+    if (!s_slots[index].added) {
+        return -1;
+    }
+    if (ble_gatts_ntf_ind_send(s_conn_idx, s_slots[index].svc_id, KLIN_GATT_IDX_VAL,
+                               s_slots[index].value, (uint16_t)s_slots[index].value_len,
+                               BLE_GATT_NOTIFY) != BLE_ERR_NO_ERROR) {
         return -1;
     }
     return 0;
+}
+
+int klin_gd32v_ble_gatt_notify(void)
+{
+    return klin_gd32v_ble_gatt_notify_at(0);
 }
 
 int klin_gd32v_ble_scan_start(int duration_ms)
@@ -747,6 +940,9 @@ int klin_gd32v_ble_central_disconnect(void)
 int klin_gd32v_ble_gattc_discover(int timeout_ms)
 {
     if (!s_inited || !s_central_connected) {
+        return -1;
+    }
+    if (klin_gd32v_ble_gattc_ensure_reg_cb() != 0) {
         return -1;
     }
     klin_gd32v_ble_gattc_reset();
@@ -1027,15 +1223,14 @@ int klin_gd32v_ble_bond_clear(void)
 
 int klin_gd32v_ble_init(void)
 {
+    klin_gd32v_ble_slots_ensure_default();
     s_inited = 1;
-    s_gatt_len = 0;
-    s_gatt_written = 0;
     s_scanning = 0;
     s_central_connected = 0;
     s_scan_count = 0;
     s_bond_enabled = 0;
-    memset(s_gatt_value, 0, sizeof(s_gatt_value));
     memset(s_scan, 0, sizeof(s_scan));
+    klin_gd32v_ble_gatt_values_reset();
     klin_gd32v_ble_gattc_reset();
     klin_gd32v_ble_bond_link_reset();
     klin_gd32v_ble_passkey_reset();
@@ -1086,20 +1281,29 @@ int klin_gd32v_ble_stop(void)
     s_central_connected = 0;
     s_inited = 0;
     s_bond_enabled = 0;
-    s_gatt_len = 0;
-    s_gatt_written = 0;
     s_scan_count = 0;
-    memset(s_gatt_value, 0, sizeof(s_gatt_value));
     memset(s_scan, 0, sizeof(s_scan));
+    klin_gd32v_ble_gatt_values_reset();
     klin_gd32v_ble_gattc_reset();
     klin_gd32v_ble_bond_link_reset();
     klin_gd32v_ble_passkey_reset();
     return 0;
 }
 
+int klin_gd32v_ble_gatt_notify_at(int index)
+{
+    if (!s_inited) {
+        return -1;
+    }
+    if (index < 0 || index >= s_slot_count) {
+        return -1;
+    }
+    return 0;
+}
+
 int klin_gd32v_ble_gatt_notify(void)
 {
-    return 0;
+    return klin_gd32v_ble_gatt_notify_at(0);
 }
 
 int klin_gd32v_ble_scan_start(int duration_ms)
@@ -1323,62 +1527,232 @@ int klin_gd32v_ble_gatt_uuid16(int svc_uuid16, int chr_uuid16)
     if (s_inited) {
         return -1;
     }
-    s_svc_uuid16 = (uint16_t)svc_uuid16;
-    s_chr_uuid16 = (uint16_t)chr_uuid16;
+    if (s_slot_count < 1) {
+        s_slot_count = 1;
+        memset(&s_slots[0], 0, sizeof(s_slots[0]));
+    }
+    s_slots[0].kind = KLIN_GD32V_BLE_UUID_KIND_16;
+    s_slots[0].svc16 = (uint16_t)svc_uuid16;
+    s_slots[0].chr16 = (uint16_t)chr_uuid16;
+    s_gattc_override = 0;
+    s_gattc_sel = 0;
     return 0;
+}
+
+int klin_gd32v_ble_gatt_uuid128(const unsigned char *svc16, const unsigned char *chr16)
+{
+    if (svc16 == NULL || chr16 == NULL) {
+        return -1;
+    }
+    if (s_inited) {
+        return -1;
+    }
+    if (s_slot_count < 1) {
+        s_slot_count = 1;
+        memset(&s_slots[0], 0, sizeof(s_slots[0]));
+    }
+    s_slots[0].kind = KLIN_GD32V_BLE_UUID_KIND_128;
+    memcpy(s_slots[0].svc128, svc16, 16);
+    memcpy(s_slots[0].chr128, chr16, 16);
+    s_gattc_override = 0;
+    s_gattc_sel = 0;
+    return 0;
+}
+
+int klin_gd32v_ble_gatt_add_uuid16(int svc_uuid16, int chr_uuid16)
+{
+    int i;
+
+    if (svc_uuid16 <= 0 || svc_uuid16 > 0xFFFF || chr_uuid16 <= 0 ||
+        chr_uuid16 > 0xFFFF) {
+        return -1;
+    }
+    if (s_inited) {
+        return -1;
+    }
+    if (s_slot_count >= KLIN_GD32V_BLE_GATT_SVC_MAX) {
+        return -1;
+    }
+    i = s_slot_count++;
+    memset(&s_slots[i], 0, sizeof(s_slots[i]));
+    s_slots[i].kind = KLIN_GD32V_BLE_UUID_KIND_16;
+    s_slots[i].svc16 = (uint16_t)svc_uuid16;
+    s_slots[i].chr16 = (uint16_t)chr_uuid16;
+    return 0;
+}
+
+int klin_gd32v_ble_gatt_add_uuid128(const unsigned char *svc16, const unsigned char *chr16)
+{
+    int i;
+
+    if (svc16 == NULL || chr16 == NULL) {
+        return -1;
+    }
+    if (s_inited) {
+        return -1;
+    }
+    if (s_slot_count >= KLIN_GD32V_BLE_GATT_SVC_MAX) {
+        return -1;
+    }
+    i = s_slot_count++;
+    memset(&s_slots[i], 0, sizeof(s_slots[i]));
+    s_slots[i].kind = KLIN_GD32V_BLE_UUID_KIND_128;
+    memcpy(s_slots[i].svc128, svc16, 16);
+    memcpy(s_slots[i].chr128, chr16, 16);
+    return 0;
+}
+
+int klin_gd32v_ble_gatt_clear(void)
+{
+    if (s_inited) {
+        return -1;
+    }
+    s_slot_count = 0;
+    memset(s_slots, 0, sizeof(s_slots));
+    return 0;
+}
+
+int klin_gd32v_ble_gatt_svc_count(void)
+{
+    if (s_slot_count == 0 && !s_inited) {
+        return 1; /* default will be installed at init */
+    }
+    return s_slot_count > 0 ? s_slot_count : (s_inited ? s_slot_count : 1);
 }
 
 int klin_gd32v_ble_gatt_svc_uuid16(void)
 {
-    return (int)s_svc_uuid16;
+    if (s_slot_count < 1) {
+        return KLIN_GD32V_BLE_GATT_SVC_UUID16;
+    }
+    if (s_slots[0].kind != KLIN_GD32V_BLE_UUID_KIND_16) {
+        return 0;
+    }
+    return (int)s_slots[0].svc16;
 }
 
 int klin_gd32v_ble_gatt_chr_uuid16(void)
 {
-    return (int)s_chr_uuid16;
+    if (s_slot_count < 1) {
+        return KLIN_GD32V_BLE_GATT_CHR_UUID16;
+    }
+    if (s_slots[0].kind != KLIN_GD32V_BLE_UUID_KIND_16) {
+        return 0;
+    }
+    return (int)s_slots[0].chr16;
+}
+
+int klin_gd32v_ble_gatt_set_at(int index, const unsigned char *data, int len)
+{
+    if (!s_inited) {
+        return -1;
+    }
+    if (index < 0 || index >= s_slot_count) {
+        return -1;
+    }
+    if (data == NULL || len < 0 || len > KLIN_GD32V_BLE_GATT_VALUE_MAX) {
+        return -1;
+    }
+    if (len > 0) {
+        memcpy(s_slots[index].value, data, (size_t)len);
+    }
+    s_slots[index].value_len = len;
+    return 0;
 }
 
 int klin_gd32v_ble_gatt_set(const unsigned char *data, int len)
 {
-    if (!s_inited || data == NULL || len < 0 || len > KLIN_GD32V_BLE_GATT_VALUE_MAX) {
-        return -1;
-    }
-    if (len > 0) {
-        memcpy(s_gatt_value, data, (size_t)len);
-    }
-    s_gatt_len = len;
-    return 0;
+    return klin_gd32v_ble_gatt_set_at(0, data, len);
 }
 
-int klin_gd32v_ble_gatt_get(unsigned char *out, int max_len)
+int klin_gd32v_ble_gatt_get_at(int index, unsigned char *out, int max_len)
 {
     int n;
 
-    if (!s_inited || out == NULL || max_len < 0) {
+    if (!s_inited) {
         return -1;
     }
-    n = s_gatt_len;
+    if (index < 0 || index >= s_slot_count || out == NULL || max_len < 0) {
+        return -1;
+    }
+    n = s_slots[index].value_len;
     if (n > max_len) {
         n = max_len;
     }
     if (n > 0) {
-        memcpy(out, s_gatt_value, (size_t)n);
+        memcpy(out, s_slots[index].value, (size_t)n);
     }
     return n;
 }
 
+int klin_gd32v_ble_gatt_get(unsigned char *out, int max_len)
+{
+    return klin_gd32v_ble_gatt_get_at(0, out, max_len);
+}
+
+int klin_gd32v_ble_gatt_len_at(int index)
+{
+    if (index < 0 || index >= s_slot_count) {
+        return 0;
+    }
+    return s_slots[index].value_len;
+}
+
 int klin_gd32v_ble_gatt_len(void)
 {
-    return s_gatt_len;
+    return klin_gd32v_ble_gatt_len_at(0);
+}
+
+int klin_gd32v_ble_gatt_written_at(int index)
+{
+    int w;
+
+    if (index < 0 || index >= s_slot_count) {
+        return 0;
+    }
+    w = s_slots[index].written;
+    s_slots[index].written = 0;
+    return w ? 1 : 0;
 }
 
 int klin_gd32v_ble_gatt_written(void)
 {
-    int w;
+    return klin_gd32v_ble_gatt_written_at(0);
+}
 
-    w = s_gatt_written;
-    s_gatt_written = 0;
-    return w;
+int klin_gd32v_ble_gattc_select(int index)
+{
+    if (index < 0 || index >= klin_gd32v_ble_slot_limit()) {
+        return -1;
+    }
+    s_gattc_sel = index;
+    s_gattc_override = 0;
+    return 0;
+}
+
+int klin_gd32v_ble_gattc_uuid16(int svc_uuid16, int chr_uuid16)
+{
+    if (svc_uuid16 <= 0 || svc_uuid16 > 0xFFFF || chr_uuid16 <= 0 ||
+        chr_uuid16 > 0xFFFF) {
+        return -1;
+    }
+    s_gattc_kind = KLIN_GD32V_BLE_UUID_KIND_16;
+    s_gattc_svc16 = (uint16_t)svc_uuid16;
+    s_gattc_chr16 = (uint16_t)chr_uuid16;
+    s_gattc_override = 1;
+    return 0;
+}
+
+int klin_gd32v_ble_gattc_uuid128(const unsigned char *svc16, const unsigned char *chr16)
+{
+    if (svc16 == NULL || chr16 == NULL) {
+        return -1;
+    }
+    s_gattc_kind = KLIN_GD32V_BLE_UUID_KIND_128;
+    memcpy(s_gattc_svc128, svc16, 16);
+    memcpy(s_gattc_chr128, chr16, 16);
+    s_gattc_override = 1;
+    return 0;
 }
 
 int klin_gd32v_ble_scan_count(void)

@@ -1,0 +1,142 @@
+module gd32v_ble
+
+import testing
+
+fn test_gatt_clear_add_and_set_at() {
+    let mut out: [4]u8
+    let mut v: [4]u8
+    let mut svc128: [16]u8
+    let mut chr128: [16]u8
+    let mut n: i32
+    let mut w: i32
+
+    testing.assert_eq_i32(stop(), 0)
+    testing.assert_eq_i32(gatt_clear(), 0)
+    testing.assert_eq_i32(gatt_svc_count(), 1)
+    testing.assert_eq_i32(gatt_add_uuid16(0xA001, 0xA002), 0)
+    testing.assert_eq_i32(gatt_add_uuid16(0xB001, 0xB002), 0)
+    svc128[0] = 1
+    svc128[1] = 2
+    svc128[2] = 3
+    svc128[3] = 4
+    svc128[4] = 5
+    svc128[5] = 6
+    svc128[6] = 7
+    svc128[7] = 8
+    svc128[8] = 9
+    svc128[9] = 10
+    svc128[10] = 11
+    svc128[11] = 12
+    svc128[12] = 13
+    svc128[13] = 14
+    svc128[14] = 15
+    svc128[15] = 16
+    chr128[0] = 0x10
+    chr128[1] = 0x11
+    chr128[2] = 0x12
+    chr128[3] = 0x13
+    chr128[4] = 0x14
+    chr128[5] = 0x15
+    chr128[6] = 0x16
+    chr128[7] = 0x17
+    chr128[8] = 0x18
+    chr128[9] = 0x19
+    chr128[10] = 0x1a
+    chr128[11] = 0x1b
+    chr128[12] = 0x1c
+    chr128[13] = 0x1d
+    chr128[14] = 0x1e
+    chr128[15] = 0x1f
+    testing.assert_eq_i32(gatt_add_uuid128(cast(*u8, &svc128[0]), cast(*u8, &chr128[0])), 0)
+    testing.assert_eq_i32(gatt_svc_count(), 3)
+    testing.assert_eq_i32(gatt_svc_uuid16(), 0xA001)
+    testing.assert_eq_i32(gatt_chr_uuid16(), 0xA002)
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(gatt_add_uuid16(0xC001, 0xC002), 0 - 1)
+    testing.assert_eq_i32(gatt_clear(), 0 - 1)
+    v[0] = 1
+    v[1] = 2
+    v[2] = 3
+    v[3] = 4
+    testing.assert_eq_i32(gatt_set_at(0, cast(*u8, &v[0]), 4), 0)
+    testing.assert_eq_i32(gatt_set_at(1, cast(*u8, &v[0]), 2), 0)
+    testing.assert_eq_i32(gatt_set_at(2, cast(*u8, &v[0]), 1), 0)
+    testing.assert_eq_i32(gatt_len_at(0), 4)
+    testing.assert_eq_i32(gatt_len_at(1), 2)
+    testing.assert_eq_i32(gatt_len_at(2), 1)
+    n = gatt_get_at(0, cast(*mut u8, &out[0]), 4)
+    testing.assert_eq_i32(n, 4)
+    testing.assert(out[0] == 1)
+    testing.assert_eq_i32(gatt_notify_at(1), 0)
+    w = 0
+    if gatt_written_at(2) {
+        w = 1
+    }
+    testing.assert_eq_i32(w, 0)
+    testing.assert_eq_i32(gattc_select(1), 0)
+    testing.assert_eq_i32(gattc_uuid16(0xA001, 0xA002), 0)
+    testing.assert_eq_i32(gattc_uuid128(cast(*u8, &svc128[0]), cast(*u8, &chr128[0])), 0)
+    testing.assert_eq_i32(gattc_select(9), 0 - 1)
+    testing.assert_eq_i32(stop(), 0)
+    testing.assert_eq_i32(gatt_clear(), 0)
+    testing.assert_eq_i32(gatt_uuid16(0xFFF0, 0xFFF1), 0)
+}
+
+fn test_gatt_uuid128_slot0_reports_zero_uuid16() {
+    let mut svc128: [16]u8
+    let mut chr128: [16]u8
+
+    testing.assert_eq_i32(stop(), 0)
+    testing.assert_eq_i32(gatt_clear(), 0)
+    svc128[0] = 1
+    svc128[1] = 1
+    svc128[2] = 1
+    svc128[3] = 1
+    svc128[4] = 1
+    svc128[5] = 1
+    svc128[6] = 1
+    svc128[7] = 1
+    svc128[8] = 1
+    svc128[9] = 1
+    svc128[10] = 1
+    svc128[11] = 1
+    svc128[12] = 1
+    svc128[13] = 1
+    svc128[14] = 1
+    svc128[15] = 1
+    chr128[0] = 2
+    chr128[1] = 2
+    chr128[2] = 2
+    chr128[3] = 2
+    chr128[4] = 2
+    chr128[5] = 2
+    chr128[6] = 2
+    chr128[7] = 2
+    chr128[8] = 2
+    chr128[9] = 2
+    chr128[10] = 2
+    chr128[11] = 2
+    chr128[12] = 2
+    chr128[13] = 2
+    chr128[14] = 2
+    chr128[15] = 2
+    testing.assert_eq_i32(gatt_uuid128(cast(*u8, &svc128[0]), cast(*u8, &chr128[0])), 0)
+    testing.assert_eq_i32(gatt_svc_uuid16(), 0)
+    testing.assert_eq_i32(gatt_chr_uuid16(), 0)
+    testing.assert_eq_i32(gatt_svc_count(), 1)
+    testing.assert_eq_i32(gatt_clear(), 0)
+    testing.assert_eq_i32(gatt_uuid16(0xFFF0, 0xFFF1), 0)
+}
+
+fn test_gatt_add_rejects_fifth_service() {
+    testing.assert_eq_i32(stop(), 0)
+    testing.assert_eq_i32(gatt_clear(), 0)
+    testing.assert_eq_i32(gatt_add_uuid16(0x1001, 0x1002), 0)
+    testing.assert_eq_i32(gatt_add_uuid16(0x2001, 0x2002), 0)
+    testing.assert_eq_i32(gatt_add_uuid16(0x3001, 0x3002), 0)
+    testing.assert_eq_i32(gatt_add_uuid16(0x4001, 0x4002), 0)
+    testing.assert_eq_i32(gatt_add_uuid16(0x5001, 0x5002), 0 - 1)
+    testing.assert_eq_i32(gatt_svc_count(), 4)
+    testing.assert_eq_i32(gatt_clear(), 0)
+    testing.assert_eq_i32(gatt_uuid16(0xFFF0, 0xFFF1), 0)
+}
