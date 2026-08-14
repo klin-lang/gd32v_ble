@@ -2,7 +2,7 @@
  * Klin over the GigaDevice VW55x BLE SDK. Heap / OSAL BLE task / GAP / GATTS /
  * GATTC / security / scan events are SDK contracts (not Klin magic).
  *
- * `@v0.8.0` = … + 128-bit UUID + up to 4 services (`gatt_add_*` / `gatt_*_at`).
+ * `@v0.9.0` = … + LE privacy / RPA (`privacy_enable` before advertise/scan).
  * Peripheral GATT: up to KLIN_GD32V_BLE_GATT_SVC_MAX services (1 chr each),
  * 16-bit or 128-bit UUIDs via gatt_uuid* / gatt_add_* before init.
  * Default single svc 0xFFF0 / chr 0xFFF1 when unset.
@@ -150,6 +150,27 @@ int klin_gd32v_ble_bonded(void);
 int klin_gd32v_ble_wait_bonded(int timeout_ms);
 int klin_gd32v_ble_bond_count(void);
 int klin_gd32v_ble_bond_clear(void);
+
+/**
+ * Enable LE privacy (controller RPA via `ble_adp_privacy_recfg`). Call after
+ * `init`, before advertise/scan/connect. Fails if advertising, scanning, or
+ * connected (peripheral or central).
+ */
+int klin_gd32v_ble_privacy_enable(void);
+/** Disable privacy; restore static/public own address type. Same idle constraint. */
+int klin_gd32v_ble_privacy_disable(void);
+int klin_gd32v_ble_privacy_enabled(void);
+/**
+ * Local addr type enum value (`BLE_GAP_LOCAL_ADDR_STATIC` = 0 /
+ * `BLE_GAP_LOCAL_ADDR_RESOLVABLE` = 1 when privacy on).
+ */
+int klin_gd32v_ble_own_addr_type(void);
+/**
+ * Copy 6-byte own identity/public address into `out6`.
+ * Privacy off: `ble_adp_public_addr_get`. Privacy on: identity via
+ * `ble_adp_identity_addr_get` (`.addr`), else public fallback.
+ */
+int klin_gd32v_ble_own_addr(unsigned char *out6);
 
 #ifdef __cplusplus
 }

@@ -1,0 +1,66 @@
+module gd32v_ble
+
+import testing
+
+fn test_privacy_needs_init() {
+    testing.assert_eq_i32(stop(), 0)
+    testing.assert_eq_i32(privacy_enable(), 0 - 1)
+    testing.assert_eq_i32(privacy_disable(), 0 - 1)
+    testing.assert_eq_i32(own_addr_type(), 0)
+}
+
+fn test_privacy_enable_disable_idle() {
+    let mut pe: i32
+    let mut addr: [6]u8
+
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(privacy_enable(), 0)
+    pe = 0
+    if privacy_enabled() {
+        pe = 1
+    }
+    testing.assert_eq_i32(pe, 1)
+    testing.assert_eq_i32(own_addr_type(), 1)
+    testing.assert_eq_i32(own_addr(cast(*mut u8, &addr[0])), 0)
+    testing.assert(addr[0] == 2)
+    testing.assert(addr[5] == 7)
+    testing.assert_eq_i32(privacy_disable(), 0)
+    pe = 0
+    if privacy_enabled() {
+        pe = 1
+    }
+    testing.assert_eq_i32(pe, 0)
+    testing.assert_eq_i32(own_addr_type(), 0)
+    testing.assert_eq_i32(own_addr(cast(*mut u8, &addr[0])), 0)
+    testing.assert(addr[0] == 1)
+    testing.assert(addr[5] == 6)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_privacy_rejected_while_advertising() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(advertise("klin"), 0)
+    testing.assert_eq_i32(privacy_enable(), 0 - 1)
+    testing.assert_eq_i32(stop_advertise(), 0)
+    testing.assert_eq_i32(privacy_enable(), 0)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_privacy_rejected_while_connected() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(advertise("klin"), 0)
+    testing.assert_eq_i32(wait_connected(0), 0)
+    testing.assert_eq_i32(stop_advertise(), 0)
+    testing.assert_eq_i32(privacy_enable(), 0 - 1)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_privacy_rejected_while_central() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(scan_start(100), 0)
+    testing.assert_eq_i32(central_connect(0, 100), 0)
+    testing.assert_eq_i32(privacy_enable(), 0 - 1)
+    testing.assert_eq_i32(central_disconnect(), 0)
+    testing.assert_eq_i32(privacy_enable(), 0)
+    testing.assert_eq_i32(stop(), 0)
+}

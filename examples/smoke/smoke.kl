@@ -68,6 +68,23 @@ fn main() {
     if e != ble.err_ok() {
         return
     }
+    e = ble.privacy_enable()
+    if e != ble.err_ok() {
+        return
+    }
+    if !ble.privacy_enabled() {
+        return
+    }
+    let mut oaddr: [6]u8
+    e = ble.own_addr(cast(*mut u8, &oaddr[0]))
+    if e != ble.err_ok() {
+        return
+    }
+    let _oat = ble.own_addr_type()
+    e = ble.privacy_disable()
+    if e != ble.err_ok() {
+        return
+    }
     // After init, uuid change must fail.
     e = ble.gatt_uuid16(0xC001, 0xC002)
     if e == ble.err_ok() {
@@ -179,7 +196,7 @@ fn main() {
     let _bc = ble.bond_count()
     let _bcl = ble.bond_clear()
     let _cd = ble.central_disconnect()
-    if ble.version() != 8 {
+    if ble.version() != 9 {
         return
     }
     let _s = ble.stop()

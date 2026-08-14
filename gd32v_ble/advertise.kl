@@ -11,6 +11,7 @@
 /// Custom UUID16 (`@v0.6.0`): `gatt_uuid16` before `init` (default remains 0xFFF0/0xFFF1).
 /// Passkey (`@v0.7.0`): `bond_passkey(pin)` MITM + fixed PIN (replaces Just Works SM).
 /// UUID128 + multi (`@v0.8.0`): `gatt_uuid128` / `gatt_add_*` / `gatt_*_at` / `gattc_select`.
+/// Privacy (`@v0.9.0`): LE privacy / RPA via `privacy_enable` before advertise/scan/connect.
 /// Central / GATT client / bonding need an SDK build with those roles (e.g. msdk_ffd).
 module gd32v_ble
 
@@ -185,6 +186,21 @@ fn klin_gd32v_ble_bond_count(): i32
 
 @[cimport, codename("klin_gd32v_ble_bond_clear")]
 fn klin_gd32v_ble_bond_clear(): i32
+
+@[cimport, codename("klin_gd32v_ble_privacy_enable")]
+fn klin_gd32v_ble_privacy_enable(): i32
+
+@[cimport, codename("klin_gd32v_ble_privacy_disable")]
+fn klin_gd32v_ble_privacy_disable(): i32
+
+@[cimport, codename("klin_gd32v_ble_privacy_enabled")]
+fn klin_gd32v_ble_privacy_enabled(): i32
+
+@[cimport, codename("klin_gd32v_ble_own_addr_type")]
+fn klin_gd32v_ble_own_addr_type(): i32
+
+@[cimport, codename("klin_gd32v_ble_own_addr")]
+fn klin_gd32v_ble_own_addr(out6: *mut u8): i32
 
 /// SDK / glue success (0).
 pub fn err_ok(): i32 {
@@ -459,4 +475,26 @@ pub fn bond_count(): i32 {
 
 pub fn bond_clear(): i32 {
     return klin_gd32v_ble_bond_clear()
+}
+
+/// LE privacy / RPA. After `init`, before advertise/scan/connect.
+pub fn privacy_enable(): i32 {
+    return klin_gd32v_ble_privacy_enable()
+}
+
+pub fn privacy_disable(): i32 {
+    return klin_gd32v_ble_privacy_disable()
+}
+
+pub fn privacy_enabled(): bool {
+    return klin_gd32v_ble_privacy_enabled() != 0
+}
+
+pub fn own_addr_type(): i32 {
+    return klin_gd32v_ble_own_addr_type()
+}
+
+/// Copy 6-byte own BD_ADDR into `out6`.
+pub fn own_addr(out6: *mut u8): i32 {
+    return klin_gd32v_ble_own_addr(out6)
 }

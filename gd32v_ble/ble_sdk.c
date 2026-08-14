@@ -1,11 +1,14 @@
 /* BLE advertise + GATT + central scan + GATT client + bonding + UUID128 +
- * multi-service for Klin on GD32VW553. Real path: GigaDevice VW55x Wi-Fi BLE SDK
- * (AN152 `ble_init` / `app_adv_*` / `ble_gatts_*` / `ble_scan_*` / `ble_conn_*`
- * / `ble_gattc_*` / `app_sec_*`). Host path: stubs when SDK headers are not on
- * the include path.
+ * multi-service + LE privacy for Klin on GD32VW553. Real path: GigaDevice VW55x
+ * Wi-Fi BLE SDK (AN152 `ble_init` / `app_adv_*` / `ble_gatts_*` / `ble_scan_*` /
+ * `ble_conn_*` / `ble_gattc_*` / `app_sec_*` / `ble_adp_privacy_recfg`).
+ * Host path: stubs when SDK headers are not on the include path.
  *
  * Scan table is fixed (max 16) — no glue malloc. Central / GATT client /
  * bonding need an SDK image with those roles (e.g. msdk_ffd).
+ * Privacy: controller RPA via `ble_adp_privacy_recfg` + RESOLVABLE own_addr_type
+ * for adv/scan/connect. `own_addr` uses public / identity getters (no LOC_ADDR
+ * event cache — keep it simple).
  */
 #include "ble_sdk.h"
 
@@ -32,6 +35,7 @@
 #include "ble_types.h"
 #include "ble_storage.h"
 #include "ble_gap.h"
+#include "ble_adapter.h"
 #if defined(__has_include)
 #if __has_include("wrapper_os.h")
 #include "wrapper_os.h"
@@ -95,6 +99,10 @@ static uint32_t s_passkey;
 static int s_passkey_action; /* 0 / 2=input / 3=disp / 4=numcmp */
 static uint8_t s_passkey_conn_idx;
 
+/* LE privacy / RPA (`privacy_enable`). own_addr_type tracks GAP local enum. */
+static int s_privacy;
+static uint8_t s_own_addr_type;
+
 /* Server GATT table (max KLIN_GD32V_BLE_GATT_SVC_MAX). Built before init. */
 static klin_gd32v_ble_gatt_slot_t s_slots[KLIN_GD32V_BLE_GATT_SVC_MAX];
 static int s_slot_count;
@@ -139,6 +147,13 @@ static void klin_gd32v_ble_passkey_reset(void)
     s_passkey = 0;
     s_passkey_action = 0;
     s_passkey_conn_idx = 0;
+}
+
+static void klin_gd32v_ble_privacy_reset(void)
+{
+    s_privacy = 0;
+    /* BLE_GAP_LOCAL_ADDR_STATIC == 0 */
+    s_own_addr_type = 0;
 }
 
 static void klin_gd32v_ble_slots_ensure_default(void)
@@ -700,6 +715,7 @@ int klin_gd32v_ble_init(void)
     klin_gd32v_ble_gattc_reset();
     klin_gd32v_ble_bond_link_reset();
     klin_gd32v_ble_passkey_reset();
+    klin_gd32v_ble_privacy_reset();
     s_bond_enabled = 0;
     klin_gd32v_ble_scan_clear();
     return 0;
@@ -725,6 +741,7 @@ int klin_gd32v_ble_advertise(const char *name)
     p.prop = BLE_GAP_ADV_PROP_UNDIR_CONN;
     p.disc_mode = BLE_GAP_ADV_MODE_GEN_DISC;
     p.adv_intv = APP_ADV_INT_MIN;
+    p.own_addr_type = s_own_addr_type;
     if (app_adv_create(&p) != BLE_ERR_NO_ERROR) {
         return -1;
     }
@@ -801,6 +818,7 @@ int klin_gd32v_ble_stop(void)
     klin_gd32v_ble_gattc_reset();
     klin_gd32v_ble_bond_link_reset();
     klin_gd32v_ble_passkey_reset();
+    klin_gd32v_ble_privacy_reset();
     klin_gd32v_ble_scan_clear();
     ble_deinit();
     return 0;
@@ -856,7 +874,7 @@ int klin_gd32v_ble_scan_start(int duration_ms)
         dur10 = 1;
     }
     param.duration = dur10;
-    if (ble_scan_param_set(BLE_GAP_LOCAL_ADDR_STATIC, &param) != BLE_ERR_NO_ERROR) {
+    if (ble_scan_param_set(s_own_addr_type, &param) != BLE_ERR_NO_ERROR) {
         return -1;
     }
     if (ble_scan_enable() != BLE_ERR_NO_ERROR) {
@@ -896,7 +914,7 @@ int klin_gd32v_ble_central_connect(int index, int timeout_ms)
     memset(&peer, 0, sizeof(peer));
     peer.addr_type = s_scan[index].addr_type;
     memcpy(peer.addr, s_scan[index].addr, 6);
-    if (ble_conn_connect(NULL, BLE_GAP_LOCAL_ADDR_STATIC, &peer, 0) != BLE_ERR_NO_ERROR) {
+    if (ble_conn_connect(NULL, s_own_addr_type, &peer, 0) != BLE_ERR_NO_ERROR) {
         return -1;
     }
     return 0;
@@ -1219,6 +1237,77 @@ int klin_gd32v_ble_bond_clear(void)
     return 0;
 }
 
+static int klin_gd32v_ble_privacy_radio_busy(void)
+{
+    return (s_advertising || s_scanning || s_connected || s_central_connected) ? 1 : 0;
+}
+
+int klin_gd32v_ble_privacy_enable(void)
+{
+    if (!s_inited) {
+        return -1;
+    }
+    if (klin_gd32v_ble_privacy_radio_busy()) {
+        return -1;
+    }
+    if (ble_adp_privacy_recfg((uint8_t)BLE_GAP_PRIV_CFG_PRIV_EN_BIT, NULL) !=
+        BLE_ERR_NO_ERROR) {
+        return -1;
+    }
+    s_privacy = 1;
+    s_own_addr_type = (uint8_t)BLE_GAP_LOCAL_ADDR_RESOLVABLE;
+    return 0;
+}
+
+int klin_gd32v_ble_privacy_disable(void)
+{
+    if (!s_inited) {
+        return -1;
+    }
+    if (klin_gd32v_ble_privacy_radio_busy()) {
+        return -1;
+    }
+    if (ble_adp_privacy_recfg(0, NULL) != BLE_ERR_NO_ERROR) {
+        return -1;
+    }
+    s_privacy = 0;
+    s_own_addr_type = (uint8_t)BLE_GAP_LOCAL_ADDR_STATIC;
+    return 0;
+}
+
+int klin_gd32v_ble_privacy_enabled(void)
+{
+    return s_privacy ? 1 : 0;
+}
+
+int klin_gd32v_ble_own_addr_type(void)
+{
+    return (int)s_own_addr_type;
+}
+
+int klin_gd32v_ble_own_addr(unsigned char *out6)
+{
+    ble_gap_addr_t id;
+
+    if (out6 == NULL) {
+        return -1;
+    }
+    if (!s_inited) {
+        return -1;
+    }
+    if (s_privacy) {
+        if (ble_adp_identity_addr_get(&id) == BLE_ERR_NO_ERROR) {
+            memcpy(out6, id.addr, 6);
+            return 0;
+        }
+        /* Fallback: public address if identity is not ready yet. */
+    }
+    if (ble_adp_public_addr_get(out6) != BLE_ERR_NO_ERROR) {
+        return -1;
+    }
+    return 0;
+}
+
 #else /* host stubs — no SDK headers */
 
 int klin_gd32v_ble_init(void)
@@ -1234,6 +1323,7 @@ int klin_gd32v_ble_init(void)
     klin_gd32v_ble_gattc_reset();
     klin_gd32v_ble_bond_link_reset();
     klin_gd32v_ble_passkey_reset();
+    klin_gd32v_ble_privacy_reset();
     return 0;
 }
 
@@ -1287,6 +1377,7 @@ int klin_gd32v_ble_stop(void)
     klin_gd32v_ble_gattc_reset();
     klin_gd32v_ble_bond_link_reset();
     klin_gd32v_ble_passkey_reset();
+    klin_gd32v_ble_privacy_reset();
     return 0;
 }
 
@@ -1513,6 +1604,62 @@ int klin_gd32v_ble_bond_clear(void)
         return -1;
     }
     klin_gd32v_ble_bond_link_reset();
+    return 0;
+}
+
+static int klin_gd32v_ble_privacy_radio_busy_stub(void)
+{
+    return (s_advertising || s_scanning || s_connected || s_central_connected) ? 1 : 0;
+}
+
+int klin_gd32v_ble_privacy_enable(void)
+{
+    if (!s_inited) {
+        return -1;
+    }
+    if (klin_gd32v_ble_privacy_radio_busy_stub()) {
+        return -1;
+    }
+    s_privacy = 1;
+    s_own_addr_type = 1; /* BLE_GAP_LOCAL_ADDR_RESOLVABLE */
+    return 0;
+}
+
+int klin_gd32v_ble_privacy_disable(void)
+{
+    if (!s_inited) {
+        return -1;
+    }
+    if (klin_gd32v_ble_privacy_radio_busy_stub()) {
+        return -1;
+    }
+    s_privacy = 0;
+    s_own_addr_type = 0; /* BLE_GAP_LOCAL_ADDR_STATIC */
+    return 0;
+}
+
+int klin_gd32v_ble_privacy_enabled(void)
+{
+    return s_privacy ? 1 : 0;
+}
+
+int klin_gd32v_ble_own_addr_type(void)
+{
+    return (int)s_own_addr_type;
+}
+
+int klin_gd32v_ble_own_addr(unsigned char *out6)
+{
+    static const unsigned char stub_pub[6] = {1, 2, 3, 4, 5, 6};
+    static const unsigned char stub_priv[6] = {2, 3, 4, 5, 6, 7};
+
+    if (out6 == NULL) {
+        return -1;
+    }
+    if (!s_inited) {
+        return -1;
+    }
+    memcpy(out6, s_privacy ? stub_priv : stub_pub, 6);
     return 0;
 }
 
