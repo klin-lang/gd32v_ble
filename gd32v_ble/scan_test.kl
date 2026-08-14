@@ -1,0 +1,53 @@
+module gd32v_ble
+
+import testing
+
+fn test_host_stub_scan_one_device() {
+    let mut addr: [6]u8
+    let mut name: [8]u8
+    let mut n: i32
+    let mut c: i32
+
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(scan_start(100), 0)
+    testing.assert_eq_i32(scan_count(), 1)
+    testing.assert_eq_i32(scan_rssi(0), 0 - 40)
+    testing.assert_eq_i32(scan_addr_type(0), 0)
+    testing.assert_eq_i32(scan_addr(0, cast(*mut u8, &addr[0])), 0)
+    testing.assert(addr[0] == 1)
+    testing.assert(addr[5] == 6)
+    n = scan_name(0, cast(*mut u8, &name[0]), 8)
+    testing.assert_eq_i32(n, 4)
+    testing.assert(name[0] == 115)
+    testing.assert(name[1] == 116)
+    testing.assert(name[2] == 117)
+    testing.assert(name[3] == 98)
+    testing.assert_eq_i32(scan_stop(), 0)
+    testing.assert_eq_i32(central_connect(0, 1000), 0)
+    testing.assert_eq_i32(central_wait_connected(100), 0)
+    c = 0
+    if central_connected() {
+        c = 1
+    }
+    testing.assert_eq_i32(c, 1)
+    testing.assert_eq_i32(central_disconnect(), 0)
+    c = 0
+    if central_connected() {
+        c = 1
+    }
+    testing.assert_eq_i32(c, 0)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_scan_start_rejects_non_positive() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(scan_start(0), 0 - 1)
+    testing.assert_eq_i32(scan_start(0 - 1), 0 - 1)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_central_connect_needs_scan_result() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(central_connect(0, 100), 0 - 1)
+    testing.assert_eq_i32(stop(), 0)
+}

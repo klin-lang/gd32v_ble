@@ -1,9 +1,12 @@
-/// GD32VW553 BLE peripheral — thin Klin surface over `ble_sdk.c`.
-/// Engine = GigaDevice VW55x BLE SDK (`ble_init` / `app_adv_*` / `ble_gatts_*`, AN152).
-/// Not part of `machine_gd32v`. Not `esp_ble` (ESP-IDF NimBLE).
+/// GD32VW553 BLE — thin Klin surface over `ble_sdk.c`.
+/// Engine = GigaDevice VW55x BLE SDK (`ble_init` / `app_adv_*` / `ble_gatts_*` /
+/// `ble_scan_*` / `ble_conn_*`, AN152). Not part of `machine_gd32v`.
+/// Not `esp_ble` (ESP-IDF NimBLE).
 ///
 /// GATT MVP (`@v0.2.0`): fixed service `0xFFF0`, char `0xFFF1`
 /// (read / write / notify), value buffer max 20 bytes.
+/// Central (`@v0.3.0`): active scan (max 16, dedupe by addr) + connect by index.
+/// Central needs an SDK build with observer/central roles (e.g. msdk_ffd).
 module gd32v_ble
 
 @[link("ble_sdk.c")]
@@ -43,6 +46,39 @@ fn klin_gd32v_ble_gatt_notify(): i32
 @[cimport, codename("klin_gd32v_ble_gatt_written")]
 fn klin_gd32v_ble_gatt_written(): i32
 
+@[cimport, codename("klin_gd32v_ble_scan_start")]
+fn klin_gd32v_ble_scan_start(duration_ms: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_scan_stop")]
+fn klin_gd32v_ble_scan_stop(): i32
+
+@[cimport, codename("klin_gd32v_ble_scan_count")]
+fn klin_gd32v_ble_scan_count(): i32
+
+@[cimport, codename("klin_gd32v_ble_scan_rssi")]
+fn klin_gd32v_ble_scan_rssi(index: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_scan_addr_type")]
+fn klin_gd32v_ble_scan_addr_type(index: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_scan_addr")]
+fn klin_gd32v_ble_scan_addr(index: i32, out6: *mut u8): i32
+
+@[cimport, codename("klin_gd32v_ble_scan_name")]
+fn klin_gd32v_ble_scan_name(index: i32, out: *mut u8, max_len: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_central_connect")]
+fn klin_gd32v_ble_central_connect(index: i32, timeout_ms: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_central_connected")]
+fn klin_gd32v_ble_central_connected(): i32
+
+@[cimport, codename("klin_gd32v_ble_central_wait_connected")]
+fn klin_gd32v_ble_central_wait_connected(timeout_ms: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_central_disconnect")]
+fn klin_gd32v_ble_central_disconnect(): i32
+
 /// SDK / glue success (0).
 pub fn err_ok(): i32 {
     return 0
@@ -63,7 +99,12 @@ pub fn gatt_value_max(): i32 {
     return 20
 }
 
-/// `ble_init` + `ble_wait_ready` + GATT svc add (once).
+/// Max scan results kept (deduped by address).
+pub fn scan_max(): i32 {
+    return 16
+}
+
+/// `ble_init` + `ble_wait_ready` + GATT svc add (once) + scan/conn callbacks.
 pub fn init(): i32 {
     return klin_gd32v_ble_init()
 }
@@ -119,4 +160,52 @@ pub fn gatt_notify(): i32 {
 /// True if a central wrote since last poll (flag cleared).
 pub fn gatt_written(): bool {
     return klin_gd32v_ble_gatt_written() != 0
+}
+
+/// Blocking active scan for `duration_ms`. Stops advertising first.
+pub fn scan_start(duration_ms: i32): i32 {
+    return klin_gd32v_ble_scan_start(duration_ms)
+}
+
+pub fn scan_stop(): i32 {
+    return klin_gd32v_ble_scan_stop()
+}
+
+pub fn scan_count(): i32 {
+    return klin_gd32v_ble_scan_count()
+}
+
+pub fn scan_rssi(index: i32): i32 {
+    return klin_gd32v_ble_scan_rssi(index)
+}
+
+pub fn scan_addr_type(index: i32): i32 {
+    return klin_gd32v_ble_scan_addr_type(index)
+}
+
+/// Copy 6-byte BD_ADDR into `out6`.
+pub fn scan_addr(index: i32, out6: *mut u8): i32 {
+    return klin_gd32v_ble_scan_addr(index, out6)
+}
+
+/// Copy advertised name bytes (no NUL). Returns length.
+pub fn scan_name(index: i32, out: *mut u8, max_len: i32): i32 {
+    return klin_gd32v_ble_scan_name(index, out, max_len)
+}
+
+/// Connect as central to scan result `index` (GAP only; no GATT client yet).
+pub fn central_connect(index: i32, timeout_ms: i32): i32 {
+    return klin_gd32v_ble_central_connect(index, timeout_ms)
+}
+
+pub fn central_connected(): bool {
+    return klin_gd32v_ble_central_connected() != 0
+}
+
+pub fn central_wait_connected(timeout_ms: i32): i32 {
+    return klin_gd32v_ble_central_wait_connected(timeout_ms)
+}
+
+pub fn central_disconnect(): i32 {
+    return klin_gd32v_ble_central_disconnect()
 }

@@ -1,0 +1,41 @@
+// GD32VW553 BLE central scan — needs GD32VW55x_WiFi_BLE_SDK (observer/central build).
+// Scans 5s, connects to index 0 if any result (GAP only — no GATT client yet).
+import "../../gd32v_ble" ble
+
+fn main() {
+    let mut e = ble.init()
+    if e != ble.err_ok() {
+        return
+    }
+
+    e = ble.scan_start(5000)
+    if e != ble.err_ok() {
+        return
+    }
+
+    let n = ble.scan_count()
+    if n < 1 {
+        while true {
+            let mut i: i32 = 0
+            while i < 20000000 {
+                i = i + 1
+            }
+        }
+    }
+
+    e = ble.central_connect(0, 10000)
+    if e != ble.err_ok() {
+        return
+    }
+    e = ble.central_wait_connected(15000)
+    if e != ble.err_ok() {
+        return
+    }
+
+    while ble.central_connected() {
+        let mut i: i32 = 0
+        while i < 20000000 {
+            i = i + 1
+        }
+    }
+}
