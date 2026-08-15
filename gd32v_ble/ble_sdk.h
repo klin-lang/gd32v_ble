@@ -5,6 +5,7 @@
  * `@v0.9.0` = … + LE privacy / RPA (`privacy_enable` before advertise/scan).
  * `@v0.10.0` = … + Mesh Gen OnOff node (`mesh_enable`; needs SDK mesh / BLE_MAX).
  * `@v0.11.0` = … + Mesh provisioner (`mesh_provisioner_enable` + unprov table + prov_adv/gatt).
+ * `@v0.12.0` = … + Mesh Gen Level + vendor button on the node (`mesh_level*` / `mesh_vnd*`).
  * Peripheral GATT: up to KLIN_GD32V_BLE_GATT_SVC_MAX services (1 chr each),
  * 16-bit or 128-bit UUIDs via gatt_uuid* / gatt_add_* before init.
  * Default single svc 0xFFF0 / chr 0xFFF1 when unset.
@@ -193,6 +194,14 @@ int klin_gd32v_ble_mesh_onoff(void);
 int klin_gd32v_ble_mesh_onoff_set(int onoff);
 /** 1 if OnOff changed since last call (clears the flag). */
 int klin_gd32v_ble_mesh_onoff_changed(void);
+/** Generic Level (clamped to int16). Requires mesh node (`mesh_enable`). */
+int klin_gd32v_ble_mesh_level(void);
+int klin_gd32v_ble_mesh_level_set(int level);
+int klin_gd32v_ble_mesh_level_changed(void);
+/** Vendor button: 0 released / 1 pressed. Company 0x05F1 model 0x0000. */
+int klin_gd32v_ble_mesh_vnd(void);
+int klin_gd32v_ble_mesh_vnd_set(int state);
+int klin_gd32v_ble_mesh_vnd_changed(void);
 /** Last OOB display number from provisioning, or 0. */
 int klin_gd32v_ble_mesh_oob_number(void);
 /** Reset mesh node (leave network); re-enables provisioning bearers. */

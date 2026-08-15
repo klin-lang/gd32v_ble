@@ -3,7 +3,7 @@
 Thin **GigaDevice VW55x BLE** bindings for [Klin](https://github.com/klin-lang/klin)
 (**peripheral advertise** + **GATT server** + **central scan/connect** +
 **GATT client** + **Just Works bonding** + **custom UUID16/128** + **multi-service**
-+ **passkey/PIN** + **LE privacy / RPA** + **Mesh Gen OnOff** + **Mesh provisioner**).
++ **passkey/PIN** + **LE privacy / RPA** + **Mesh Gen OnOff** + **Mesh provisioner** + **Gen Level / vendor**).
 
 The radio is in the **silicon**; this package does **not** belong in
 [`machine_gd32v`](https://github.com/klin-lang/machine_gd32v) (MMIO Pin…Adc).
@@ -23,18 +23,19 @@ not hidden Klin allocation.
 Wi‑Fi is [`gd32v_wifi`](https://github.com/klin-lang/gd32v_wifi). Do **not**
 put BLE in a board pack.
 
-## Status (`@v0.11.0`)
+## Status (`@v0.12.0`)
 
 | API | Notes |
 |---|---|
 | `mesh_provisioner_enable` | CDB + self-provision (addr 1); exclusive with `mesh_enable` |
 | `mesh_unprov_*` / `mesh_prov_adv` / `mesh_prov_gatt` | Unprov UUID table + PB-ADV/GATT |
 | `mesh_cdb_count` / `mesh_cdb_addr` | Provisioned CDB nodes |
+| `mesh_level*` / `mesh_vnd*` | Gen Level + vendor button on `mesh_enable` node |
 | `mesh_enable` / `mesh_onoff*` / … | Prior Gen OnOff **node** |
 | Prior APIs | privacy / GATT / bond / UUID / scan / … |
 | `err_ok` | 0 |
 
-`version()` → `11`.
+`version()` → `12`.
 
 Host `klin test` uses stubs when `ble_init.h` is not on the include path.
 
@@ -60,7 +61,20 @@ fn main() {
 ```
 
 ```sh
-klin get github/klin-lang/gd32v_ble@v0.11.0
+klin get github/klin-lang/gd32v_ble@v0.12.0
+```
+
+## Usage (Level + vendor on node)
+
+```klin
+import "github/klin-lang/gd32v_ble" ble
+
+fn main() {
+    let mut e = ble.init()
+    e = ble.mesh_enable()
+    e = ble.mesh_level_set(1000)
+    e = ble.mesh_vnd_set(1) /* 0=released 1=pressed */
+}
 ```
 
 ## Contract

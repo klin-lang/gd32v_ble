@@ -14,6 +14,7 @@
 /// Privacy (`@v0.9.0`): LE privacy / RPA via `privacy_enable` before advertise/scan/connect.
 /// Mesh (`@v0.10.0`): Gen OnOff node via `mesh_enable` (needs SDK mesh / BLE_MAX like light_demo).
 /// Mesh provisioner (`@v0.11.0`): `mesh_provisioner_enable` + unprov table + `mesh_prov_adv`/`gatt`.
+/// Mesh Level + vendor (`@v0.12.0`): `mesh_level*` + `mesh_vnd*` on the Gen OnOff node composition.
 /// Central / GATT client / bonding need an SDK build with those roles (e.g. msdk_ffd).
 module gd32v_ble
 
@@ -224,6 +225,24 @@ fn klin_gd32v_ble_mesh_onoff_set(onoff: i32): i32
 
 @[cimport, codename("klin_gd32v_ble_mesh_onoff_changed")]
 fn klin_gd32v_ble_mesh_onoff_changed(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_level")]
+fn klin_gd32v_ble_mesh_level(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_level_set")]
+fn klin_gd32v_ble_mesh_level_set(level: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_level_changed")]
+fn klin_gd32v_ble_mesh_level_changed(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_vnd")]
+fn klin_gd32v_ble_mesh_vnd(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_vnd_set")]
+fn klin_gd32v_ble_mesh_vnd_set(state: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_vnd_changed")]
+fn klin_gd32v_ble_mesh_vnd_changed(): i32
 
 @[cimport, codename("klin_gd32v_ble_mesh_oob_number")]
 fn klin_gd32v_ble_mesh_oob_number(): i32
@@ -582,6 +601,32 @@ pub fn mesh_onoff_set(onoff: i32): i32 {
 
 pub fn mesh_onoff_changed(): bool {
     return klin_gd32v_ble_mesh_onoff_changed() != 0
+}
+
+/// Generic Level (int16). Requires `mesh_enable`.
+pub fn mesh_level(): i32 {
+    return klin_gd32v_ble_mesh_level()
+}
+
+pub fn mesh_level_set(level: i32): i32 {
+    return klin_gd32v_ble_mesh_level_set(level)
+}
+
+pub fn mesh_level_changed(): bool {
+    return klin_gd32v_ble_mesh_level_changed() != 0
+}
+
+/// Vendor button state (0 = released, 1 = pressed). Requires `mesh_enable`.
+pub fn mesh_vnd(): i32 {
+    return klin_gd32v_ble_mesh_vnd()
+}
+
+pub fn mesh_vnd_set(state: i32): i32 {
+    return klin_gd32v_ble_mesh_vnd_set(state)
+}
+
+pub fn mesh_vnd_changed(): bool {
+    return klin_gd32v_ble_mesh_vnd_changed() != 0
 }
 
 pub fn mesh_oob_number(): i32 {

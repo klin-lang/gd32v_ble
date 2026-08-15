@@ -219,6 +219,26 @@ fn main() {
     if ble.mesh_onoff() != 1 {
         return
     }
+    e = ble.mesh_level_set(1000)
+    if e != ble.err_ok() {
+        return
+    }
+    if !ble.mesh_level_changed() {
+        return
+    }
+    if ble.mesh_level() != 1000 {
+        return
+    }
+    e = ble.mesh_vnd_set(1)
+    if e != ble.err_ok() {
+        return
+    }
+    if !ble.mesh_vnd_changed() {
+        return
+    }
+    if ble.mesh_vnd() != 1 {
+        return
+    }
     let _oob = ble.mesh_oob_number()
     let _mr = ble.mesh_reset()
     let _st = ble.stop()
@@ -249,7 +269,7 @@ fn main() {
     if ble.mesh_cdb_count() < 2 {
         return
     }
-    if ble.version() != 11 {
+    if ble.version() != 12 {
         return
     }
     let _s = ble.stop()

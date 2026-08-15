@@ -1,0 +1,44 @@
+module gd32v_ble
+
+import testing
+
+fn test_level_vnd_need_mesh() {
+    testing.assert_eq_i32(stop(), 0)
+    testing.assert_eq_i32(mesh_level_set(100), 0 - 1)
+    testing.assert_eq_i32(mesh_vnd_set(1), 0 - 1)
+}
+
+fn test_level_vnd_after_mesh_enable() {
+    let mut ch: i32
+    let mut vch: i32
+
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(mesh_enable(), 0)
+    testing.assert_eq_i32(mesh_level_set(1000), 0)
+    ch = 0
+    if mesh_level_changed() {
+        ch = 1
+    }
+    testing.assert_eq_i32(ch, 1)
+    testing.assert_eq_i32(mesh_level(), 1000)
+    testing.assert_eq_i32(mesh_vnd_set(1), 0)
+    vch = 0
+    if mesh_vnd_changed() {
+        vch = 1
+    }
+    testing.assert_eq_i32(vch, 1)
+    testing.assert_eq_i32(mesh_vnd(), 1)
+    testing.assert_eq_i32(mesh_vnd_set(0), 0)
+    testing.assert_eq_i32(mesh_vnd(), 0)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_level_clamps_i16() {
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(mesh_enable(), 0)
+    testing.assert_eq_i32(mesh_level_set(40000), 0)
+    testing.assert_eq_i32(mesh_level(), 32767)
+    testing.assert_eq_i32(mesh_level_set(0 - 40000), 0)
+    testing.assert_eq_i32(mesh_level(), 0 - 32768)
+    testing.assert_eq_i32(stop(), 0)
+}

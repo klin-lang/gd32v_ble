@@ -14,6 +14,7 @@
  * light_demo. Without mesh headers, mesh_enable returns -1.
  * Provisioner (`@v0.11.0`): CDB + unprov table + prov_adv/gatt when
  * CONFIG_BT_MESH_PROVISIONER + CDB; mutually exclusive with mesh_enable.
+ * Level/vendor (`@v0.12.0`): Gen Level + vendor button on mesh_enable node.
  */
 #include "ble_sdk.h"
 
@@ -128,6 +129,10 @@ static int s_mesh_provisioner;
 static uint16_t s_mesh_primary;
 static uint8_t s_mesh_onoff;
 static int s_mesh_onoff_changed;
+static int16_t s_mesh_level;
+static int s_mesh_level_changed;
+static uint8_t s_mesh_vnd; /* 0 released / 1 pressed */
+static int s_mesh_vnd_changed;
 static uint32_t s_mesh_oob;
 static unsigned char s_unprov[KLIN_GD32V_BLE_UNPROV_MAX][16];
 static int s_unprov_count;
@@ -195,6 +200,10 @@ static void klin_gd32v_ble_mesh_state_reset(void)
     s_mesh_primary = 0;
     s_mesh_onoff = 0;
     s_mesh_onoff_changed = 0;
+    s_mesh_level = 0;
+    s_mesh_level_changed = 0;
+    s_mesh_vnd = 0;
+    s_mesh_vnd_changed = 0;
     s_mesh_oob = 0;
     s_unprov_count = 0;
     memset(s_unprov, 0, sizeof(s_unprov));
@@ -1362,6 +1371,12 @@ static uint8_t s_mesh_dev_uuid[16];
 static struct bt_mesh_health_srv s_mesh_health_srv;
 BT_MESH_HEALTH_PUB_DEFINE(s_mesh_health_pub, 0);
 BT_MESH_MODEL_PUB_DEFINE(s_mesh_onoff_pub, NULL, 5);
+BT_MESH_MODEL_PUB_DEFINE(s_mesh_level_pub, NULL, 5);
+
+#define KLIN_MESH_VND_CID 0x05f1
+#define KLIN_MESH_VND_MOD 0x0000
+#define KLIN_MESH_OP_VND_PRESSED  BT_MESH_MODEL_OP_3(0x00, KLIN_MESH_VND_CID)
+#define KLIN_MESH_OP_VND_RELEASED BT_MESH_MODEL_OP_3(0x01, KLIN_MESH_VND_CID)
 
 static void klin_gd32v_ble_mesh_onoff_cb(void *user_data,
                                         enum bt_mesh_srv_callback_evt evt,
@@ -1377,21 +1392,76 @@ static void klin_gd32v_ble_mesh_onoff_cb(void *user_data,
     s_mesh_onoff_changed = 1;
 }
 
+static void klin_gd32v_ble_mesh_level_cb(void *user_data,
+                                        enum bt_mesh_srv_callback_evt evt,
+                                        void *state)
+{
+    struct bt_mesh_gen_level_state *lvl = state;
+
+    (void)user_data;
+    if (evt != BT_MESH_SRV_GEN_LEVEL_EVT || lvl == NULL) {
+        return;
+    }
+    s_mesh_level = lvl->level;
+    s_mesh_level_changed = 1;
+}
+
 static struct bt_mesh_srv_callbacks s_mesh_onoff_cb = {
     .state_change = klin_gd32v_ble_mesh_onoff_cb,
+};
+
+static struct bt_mesh_srv_callbacks s_mesh_level_cb = {
+    .state_change = klin_gd32v_ble_mesh_level_cb,
 };
 
 static struct bt_mesh_gen_onoff_srv s_mesh_onoff_srv = {
     .cb = &s_mesh_onoff_cb,
 };
 
+static struct bt_mesh_gen_level_srv s_mesh_level_srv = {
+    .cb = &s_mesh_level_cb,
+};
+
+static int klin_gd32v_ble_mesh_vnd_pressed(const struct bt_mesh_model *model,
+                                           struct bt_mesh_msg_ctx *ctx,
+                                           struct net_buf_simple *buf)
+{
+    (void)model;
+    (void)ctx;
+    (void)buf;
+    s_mesh_vnd = 1;
+    s_mesh_vnd_changed = 1;
+    return 0;
+}
+
+static int klin_gd32v_ble_mesh_vnd_released(const struct bt_mesh_model *model,
+                                            struct bt_mesh_msg_ctx *ctx,
+                                            struct net_buf_simple *buf)
+{
+    (void)model;
+    (void)ctx;
+    (void)buf;
+    s_mesh_vnd = 0;
+    s_mesh_vnd_changed = 1;
+    return 0;
+}
+
+static const struct bt_mesh_model_op s_mesh_vnd_ops[] = {
+    {KLIN_MESH_OP_VND_PRESSED, BT_MESH_LEN_EXACT(0), klin_gd32v_ble_mesh_vnd_pressed},
+    {KLIN_MESH_OP_VND_RELEASED, BT_MESH_LEN_EXACT(0), klin_gd32v_ble_mesh_vnd_released},
+    BT_MESH_MODEL_OP_END,
+};
+
 static const struct bt_mesh_model s_mesh_root_models[] = {
     BT_MESH_MODEL_CFG_SRV,
     BT_MESH_MODEL_HEALTH_SRV(&s_mesh_health_srv, &s_mesh_health_pub),
     BT_MESH_MODEL_GEN_ONOFF_SRV(&s_mesh_onoff_srv, &s_mesh_onoff_pub),
+    BT_MESH_MODEL_GEN_LEVEL_SRV(&s_mesh_level_srv, &s_mesh_level_pub),
 };
 
 static const struct bt_mesh_model s_mesh_vnd_models[] = {
+    BT_MESH_MODEL_VND_CB(KLIN_MESH_VND_CID, KLIN_MESH_VND_MOD, s_mesh_vnd_ops, NULL, NULL,
+                         NULL),
 };
 
 static const struct bt_mesh_elem s_mesh_elements[] = {
@@ -1517,6 +1587,65 @@ int klin_gd32v_ble_mesh_onoff_changed(void)
     return c;
 }
 
+static int16_t klin_gd32v_ble_clamp_i16(int level)
+{
+    if (level > 32767) {
+        return 32767;
+    }
+    if (level < -32768) {
+        return (int16_t)-32768;
+    }
+    return (int16_t)level;
+}
+
+int klin_gd32v_ble_mesh_level(void)
+{
+    return (int)s_mesh_level;
+}
+
+int klin_gd32v_ble_mesh_level_set(int level)
+{
+    int16_t v;
+
+    if (!s_mesh_inited || s_mesh_provisioner) {
+        return -1;
+    }
+    v = klin_gd32v_ble_clamp_i16(level);
+    gen_level_config(&s_mesh_level_srv, v);
+    s_mesh_level = v;
+    s_mesh_level_changed = 1;
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_level_changed(void)
+{
+    int c = s_mesh_level_changed;
+    s_mesh_level_changed = 0;
+    return c;
+}
+
+int klin_gd32v_ble_mesh_vnd(void)
+{
+    return (int)s_mesh_vnd;
+}
+
+int klin_gd32v_ble_mesh_vnd_set(int state)
+{
+    if (!s_mesh_inited || s_mesh_provisioner) {
+        return -1;
+    }
+    s_mesh_vnd = state ? 1 : 0;
+    s_mesh_vnd_changed = 1;
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_vnd_changed(void)
+{
+    int c = s_mesh_vnd_changed;
+    s_mesh_vnd_changed = 0;
+    return c;
+}
+
 int klin_gd32v_ble_mesh_oob_number(void)
 {
     return (int)s_mesh_oob;
@@ -1534,6 +1663,10 @@ int klin_gd32v_ble_mesh_reset(void)
     s_mesh_oob = 0;
     s_mesh_onoff = 0;
     s_mesh_onoff_changed = 0;
+    s_mesh_level = 0;
+    s_mesh_level_changed = 0;
+    s_mesh_vnd = 0;
+    s_mesh_vnd_changed = 0;
     err = bt_mesh_prov_enable(BT_MESH_PROV_ADV | BT_MESH_PROV_GATT);
     if (err) {
         return -1;
@@ -1844,6 +1977,14 @@ int klin_gd32v_ble_mesh_onoff_changed(void)
 {
     return 0;
 }
+
+int klin_gd32v_ble_mesh_level(void) { return 0; }
+int klin_gd32v_ble_mesh_level_set(int level) { (void)level; return -1; }
+int klin_gd32v_ble_mesh_level_changed(void) { return 0; }
+int klin_gd32v_ble_mesh_vnd(void) { return 0; }
+int klin_gd32v_ble_mesh_vnd_set(int state) { (void)state; return -1; }
+int klin_gd32v_ble_mesh_vnd_changed(void) { return 0; }
+
 
 int klin_gd32v_ble_mesh_oob_number(void)
 {
@@ -2280,6 +2421,58 @@ int klin_gd32v_ble_mesh_onoff_changed(void)
     return c;
 }
 
+int klin_gd32v_ble_mesh_level(void)
+{
+    return (int)s_mesh_level;
+}
+
+int klin_gd32v_ble_mesh_level_set(int level)
+{
+    if (!s_mesh_inited || s_mesh_provisioner) {
+        return -1;
+    }
+    if (level > 32767) {
+        level = 32767;
+    }
+    if (level < -32768) {
+        level = -32768;
+    }
+    s_mesh_level = (int16_t)level;
+    s_mesh_level_changed = 1;
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_level_changed(void)
+{
+    int c = s_mesh_level_changed;
+    s_mesh_level_changed = 0;
+    return c;
+}
+
+int klin_gd32v_ble_mesh_vnd(void)
+{
+    return (int)s_mesh_vnd;
+}
+
+int klin_gd32v_ble_mesh_vnd_set(int state)
+{
+    if (!s_mesh_inited || s_mesh_provisioner) {
+        return -1;
+    }
+    s_mesh_vnd = state ? 1 : 0;
+    s_mesh_vnd_changed = 1;
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_vnd_changed(void)
+{
+    int c = s_mesh_vnd_changed;
+    s_mesh_vnd_changed = 0;
+    return c;
+}
+
+
+
 int klin_gd32v_ble_mesh_oob_number(void)
 {
     return (int)s_mesh_oob;
@@ -2294,6 +2487,10 @@ int klin_gd32v_ble_mesh_reset(void)
     s_mesh_oob = 0;
     s_mesh_onoff = 0;
     s_mesh_onoff_changed = 0;
+    s_mesh_level = 0;
+    s_mesh_level_changed = 0;
+    s_mesh_vnd = 0;
+    s_mesh_vnd_changed = 0;
     return 0;
 }
 
