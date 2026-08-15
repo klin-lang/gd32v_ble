@@ -1,0 +1,43 @@
+// GD32VW553 BLE Mesh Friend / LPN via klin-lang/gd32v_ble @v0.13.0.
+// Needs SDK CONFIG_BT_MESH_FRIEND and/or CONFIG_BT_MESH_LOW_POWER (+ BLE_MAX).
+//   make emit KLIN=/path/to/klin/bin/klin.dart
+import "../../gd32v_ble" ble
+
+fn main() {
+    let mut e = ble.init()
+    if e != ble.err_ok() {
+        return
+    }
+    e = ble.mesh_enable()
+    if e != ble.err_ok() {
+        return
+    }
+
+    // Friend node: wait for LPN friendship / terminate by addr.
+    // LPN node: mesh_lpn_set(1) then poll when established.
+    e = ble.mesh_lpn_set(1)
+    if e != ble.err_ok() {
+        // Friend-only build: just observe friendship.
+        while true {
+            if ble.mesh_friend_changed() {
+                let _a = ble.mesh_friend_lpn_addr()
+            }
+            let mut i: i32 = 0
+            while i < 20000000 {
+                i = i + 1
+            }
+        }
+    }
+
+    while true {
+        if ble.mesh_lpn_changed() {
+            if ble.mesh_lpn_established() {
+                let _ = ble.mesh_lpn_poll()
+            }
+        }
+        let mut i: i32 = 0
+        while i < 20000000 {
+            i = i + 1
+        }
+    }
+}

@@ -3,7 +3,7 @@
 Thin **GigaDevice VW55x BLE** bindings for [Klin](https://github.com/klin-lang/klin)
 (**peripheral advertise** + **GATT server** + **central scan/connect** +
 **GATT client** + **Just Works bonding** + **custom UUID16/128** + **multi-service**
-+ **passkey/PIN** + **LE privacy / RPA** + **Mesh Gen OnOff** + **Mesh provisioner** + **Gen Level / vendor**).
++ **passkey/PIN** + **LE privacy / RPA** + **Mesh Gen OnOff** + **Mesh provisioner** + **Gen Level / vendor** + **Friend / LPN**).
 
 The radio is in the **silicon**; this package does **not** belong in
 [`machine_gd32v`](https://github.com/klin-lang/machine_gd32v) (MMIO Pin…Adc).
@@ -23,10 +23,12 @@ not hidden Klin allocation.
 Wi‑Fi is [`gd32v_wifi`](https://github.com/klin-lang/gd32v_wifi). Do **not**
 put BLE in a board pack.
 
-## Status (`@v0.12.0`)
+## Status (`@v0.13.0`)
 
 | API | Notes |
 |---|---|
+| `mesh_lpn_*` / `mesh_friend_*` | LPN set/poll + Friend terminate; needs LOW_POWER / FRIEND |
+| `mesh_lpn_supported` / `mesh_friend_supported` | Compile-time feature probes |
 | `mesh_provisioner_enable` | CDB + self-provision (addr 1); exclusive with `mesh_enable` |
 | `mesh_unprov_*` / `mesh_prov_adv` / `mesh_prov_gatt` | Unprov UUID table + PB-ADV/GATT |
 | `mesh_cdb_count` / `mesh_cdb_addr` | Provisioned CDB nodes |
@@ -35,7 +37,7 @@ put BLE in a board pack.
 | Prior APIs | privacy / GATT / bond / UUID / scan / … |
 | `err_ok` | 0 |
 
-`version()` → `12`.
+`version()` → `13`.
 
 Host `klin test` uses stubs when `ble_init.h` is not on the include path.
 
@@ -61,7 +63,7 @@ fn main() {
 ```
 
 ```sh
-klin get github/klin-lang/gd32v_ble@v0.12.0
+klin get github/klin-lang/gd32v_ble@v0.13.0
 ```
 
 ## Usage (Level + vendor on node)
@@ -76,6 +78,29 @@ fn main() {
     e = ble.mesh_vnd_set(1) /* 0=released 1=pressed */
 }
 ```
+
+
+## Usage (Friend / LPN)
+
+```klin
+import "github/klin-lang/gd32v_ble" ble
+
+fn main() {
+    let mut e = ble.init()
+    e = ble.mesh_enable()
+    if ble.mesh_lpn_supported() {
+        e = ble.mesh_lpn_set(1)
+    }
+    // Friend: mesh_friend_established / mesh_friend_terminate(lpn_addr)
+}
+```
+
+```sh
+klin get github/klin-lang/gd32v_ble@v0.13.0
+```
+
+Without `CONFIG_BT_MESH_LOW_POWER` / `CONFIG_BT_MESH_FRIEND`, the matching
+calls return `-1` / `supported` is false.
 
 ## Contract
 

@@ -6,6 +6,7 @@
  * `@v0.10.0` = … + Mesh Gen OnOff node (`mesh_enable`; needs SDK mesh / BLE_MAX).
  * `@v0.11.0` = … + Mesh provisioner (`mesh_provisioner_enable` + unprov table + prov_adv/gatt).
  * `@v0.12.0` = … + Mesh Gen Level + vendor button on the node (`mesh_level*` / `mesh_vnd*`).
+ * `@v0.13.0` = … + Mesh Friend / LPN knobs (`mesh_lpn_*` / `mesh_friend_*`).
  * Peripheral GATT: up to KLIN_GD32V_BLE_GATT_SVC_MAX services (1 chr each),
  * 16-bit or 128-bit UUIDs via gatt_uuid* / gatt_add_* before init.
  * Default single svc 0xFFF0 / chr 0xFFF1 when unset.
@@ -206,6 +207,33 @@ int klin_gd32v_ble_mesh_vnd_changed(void);
 int klin_gd32v_ble_mesh_oob_number(void);
 /** Reset mesh node (leave network); re-enables provisioning bearers. */
 int klin_gd32v_ble_mesh_reset(void);
+
+/** 1 if SDK built with CONFIG_BT_MESH_LOW_POWER. */
+int klin_gd32v_ble_mesh_lpn_supported(void);
+/** 1 if SDK built with CONFIG_BT_MESH_FRIEND. */
+int klin_gd32v_ble_mesh_friend_supported(void);
+/**
+ * Enable/disable Low Power Node after `mesh_enable`.
+ * Needs CONFIG_BT_MESH_LOW_POWER; otherwise -1.
+ */
+int klin_gd32v_ble_mesh_lpn_set(int enable);
+/** Current LPN enable intent (1/0). */
+int klin_gd32v_ble_mesh_lpn(void);
+/** Friend Poll (established friendship required). */
+int klin_gd32v_ble_mesh_lpn_poll(void);
+int klin_gd32v_ble_mesh_lpn_established(void);
+/** Friend address while LPN friendship is up, else 0. */
+int klin_gd32v_ble_mesh_lpn_friend_addr(void);
+/** Poll-and-clear: LPN friendship established/terminated. */
+int klin_gd32v_ble_mesh_lpn_changed(void);
+
+int klin_gd32v_ble_mesh_friend_established(void);
+/** LPN address while Friend friendship is up, else 0. */
+int klin_gd32v_ble_mesh_friend_lpn_addr(void);
+/** Terminate Friend friendship with `lpn_addr`. Needs CONFIG_BT_MESH_FRIEND. */
+int klin_gd32v_ble_mesh_friend_terminate(int lpn_addr);
+/** Poll-and-clear: Friend friendship established/terminated. */
+int klin_gd32v_ble_mesh_friend_changed(void);
 
 /**
  * Enable Mesh provisioner (CDB + self-provision at addr 1). After `init`.

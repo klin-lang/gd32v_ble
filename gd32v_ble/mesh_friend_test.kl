@@ -1,0 +1,88 @@
+module gd32v_ble
+
+import testing
+
+fn test_friend_lpn_need_mesh() {
+    testing.assert_eq_i32(stop(), 0)
+    testing.assert_eq_i32(mesh_lpn_set(1), 0 - 1)
+    testing.assert_eq_i32(mesh_friend_terminate(3), 0 - 1)
+}
+
+fn test_friend_after_mesh_enable() {
+    let mut fs: i32
+    let mut fe: i32
+    let mut ch: i32
+
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(mesh_enable(), 0)
+    fs = 0
+    if mesh_friend_supported() {
+        fs = 1
+    }
+    testing.assert_eq_i32(fs, 1)
+    fe = 0
+    if mesh_friend_established() {
+        fe = 1
+    }
+    testing.assert_eq_i32(fe, 1)
+    testing.assert_eq_i32(mesh_friend_lpn_addr(), 3)
+    ch = 0
+    if mesh_friend_changed() {
+        ch = 1
+    }
+    testing.assert_eq_i32(ch, 1)
+    testing.assert_eq_i32(mesh_friend_terminate(3), 0)
+    fe = 0
+    if mesh_friend_established() {
+        fe = 1
+    }
+    testing.assert_eq_i32(fe, 0)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_lpn_set_establishes() {
+    let mut ls: i32
+    let mut le: i32
+    let mut ch: i32
+    let mut fe: i32
+
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(mesh_enable(), 0)
+    ls = 0
+    if mesh_lpn_supported() {
+        ls = 1
+    }
+    testing.assert_eq_i32(ls, 1)
+    testing.assert_eq_i32(mesh_lpn_set(1), 0)
+    testing.assert_eq_i32(mesh_lpn(), 1)
+    le = 0
+    if mesh_lpn_established() {
+        le = 1
+    }
+    testing.assert_eq_i32(le, 1)
+    testing.assert_eq_i32(mesh_lpn_friend_addr(), 1)
+    ch = 0
+    if mesh_lpn_changed() {
+        ch = 1
+    }
+    testing.assert_eq_i32(ch, 1)
+    fe = 0
+    if mesh_friend_established() {
+        fe = 1
+    }
+    testing.assert_eq_i32(fe, 0)
+    testing.assert_eq_i32(mesh_lpn_poll(), 0)
+    testing.assert_eq_i32(mesh_lpn_set(0), 0)
+    testing.assert_eq_i32(mesh_lpn(), 0)
+    le = 0
+    if mesh_lpn_established() {
+        le = 1
+    }
+    testing.assert_eq_i32(le, 0)
+    fe = 0
+    if mesh_friend_established() {
+        fe = 1
+    }
+    testing.assert_eq_i32(fe, 1)
+    testing.assert_eq_i32(stop(), 0)
+}

@@ -15,6 +15,7 @@
 /// Mesh (`@v0.10.0`): Gen OnOff node via `mesh_enable` (needs SDK mesh / BLE_MAX like light_demo).
 /// Mesh provisioner (`@v0.11.0`): `mesh_provisioner_enable` + unprov table + `mesh_prov_adv`/`gatt`.
 /// Mesh Level + vendor (`@v0.12.0`): `mesh_level*` + `mesh_vnd*` on the Gen OnOff node composition.
+/// Mesh Friend/LPN (`@v0.13.0`): `mesh_lpn_*` / `mesh_friend_*` (needs SDK LOW_POWER / FRIEND).
 /// Central / GATT client / bonding need an SDK build with those roles (e.g. msdk_ffd).
 module gd32v_ble
 
@@ -276,6 +277,42 @@ fn klin_gd32v_ble_mesh_cdb_count(): i32
 
 @[cimport, codename("klin_gd32v_ble_mesh_cdb_addr")]
 fn klin_gd32v_ble_mesh_cdb_addr(index: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_lpn_supported")]
+fn klin_gd32v_ble_mesh_lpn_supported(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_friend_supported")]
+fn klin_gd32v_ble_mesh_friend_supported(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_lpn_set")]
+fn klin_gd32v_ble_mesh_lpn_set(enable: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_lpn")]
+fn klin_gd32v_ble_mesh_lpn(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_lpn_poll")]
+fn klin_gd32v_ble_mesh_lpn_poll(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_lpn_established")]
+fn klin_gd32v_ble_mesh_lpn_established(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_lpn_friend_addr")]
+fn klin_gd32v_ble_mesh_lpn_friend_addr(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_lpn_changed")]
+fn klin_gd32v_ble_mesh_lpn_changed(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_friend_established")]
+fn klin_gd32v_ble_mesh_friend_established(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_friend_lpn_addr")]
+fn klin_gd32v_ble_mesh_friend_lpn_addr(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_friend_terminate")]
+fn klin_gd32v_ble_mesh_friend_terminate(lpn_addr: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_friend_changed")]
+fn klin_gd32v_ble_mesh_friend_changed(): i32
 
 /// SDK / glue success (0).
 pub fn err_ok(): i32 {
@@ -680,4 +717,55 @@ pub fn mesh_cdb_addr(index: i32): i32 {
 
 pub fn mesh_unprov_max(): i32 {
     return 8
+}
+
+/// 1 if SDK built with CONFIG_BT_MESH_LOW_POWER (host stub always 1).
+pub fn mesh_lpn_supported(): bool {
+    return klin_gd32v_ble_mesh_lpn_supported() != 0
+}
+
+/// 1 if SDK built with CONFIG_BT_MESH_FRIEND (host stub always 1).
+pub fn mesh_friend_supported(): bool {
+    return klin_gd32v_ble_mesh_friend_supported() != 0
+}
+
+/// Enable/disable Low Power Node. After `mesh_enable`. Needs LOW_POWER config.
+pub fn mesh_lpn_set(enable: i32): i32 {
+    return klin_gd32v_ble_mesh_lpn_set(enable)
+}
+
+pub fn mesh_lpn(): i32 {
+    return klin_gd32v_ble_mesh_lpn()
+}
+
+pub fn mesh_lpn_poll(): i32 {
+    return klin_gd32v_ble_mesh_lpn_poll()
+}
+
+pub fn mesh_lpn_established(): bool {
+    return klin_gd32v_ble_mesh_lpn_established() != 0
+}
+
+pub fn mesh_lpn_friend_addr(): i32 {
+    return klin_gd32v_ble_mesh_lpn_friend_addr()
+}
+
+pub fn mesh_lpn_changed(): bool {
+    return klin_gd32v_ble_mesh_lpn_changed() != 0
+}
+
+pub fn mesh_friend_established(): bool {
+    return klin_gd32v_ble_mesh_friend_established() != 0
+}
+
+pub fn mesh_friend_lpn_addr(): i32 {
+    return klin_gd32v_ble_mesh_friend_lpn_addr()
+}
+
+pub fn mesh_friend_terminate(lpn_addr: i32): i32 {
+    return klin_gd32v_ble_mesh_friend_terminate(lpn_addr)
+}
+
+pub fn mesh_friend_changed(): bool {
+    return klin_gd32v_ble_mesh_friend_changed() != 0
 }

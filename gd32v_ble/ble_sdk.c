@@ -15,6 +15,7 @@
  * Provisioner (`@v0.11.0`): CDB + unprov table + prov_adv/gatt when
  * CONFIG_BT_MESH_PROVISIONER + CDB; mutually exclusive with mesh_enable.
  * Level/vendor (`@v0.12.0`): Gen Level + vendor button on mesh_enable node.
+ * Friend/LPN (`@v0.13.0`): `mesh_lpn_*` / `mesh_friend_*` when SDK CONFIG_BT_MESH_LOW_POWER / FRIEND.
  */
 #include "ble_sdk.h"
 
@@ -58,6 +59,12 @@
 #define KLIN_GD32V_BLE_HAVE_MESH 1
 #if defined(CONFIG_BT_MESH_PROVISIONER) && (CONFIG_BT_MESH_PROVISIONER)     && defined(CONFIG_BT_MESH_CDB) && (CONFIG_BT_MESH_CDB)
 #define KLIN_GD32V_BLE_HAVE_MESH_PROVISIONER 1
+#endif
+#if defined(CONFIG_BT_MESH_LOW_POWER) && (CONFIG_BT_MESH_LOW_POWER)
+#define KLIN_GD32V_BLE_HAVE_MESH_LPN 1
+#endif
+#if defined(CONFIG_BT_MESH_FRIEND) && (CONFIG_BT_MESH_FRIEND)
+#define KLIN_GD32V_BLE_HAVE_MESH_FRIEND 1
 #endif
 #endif
 #endif
@@ -138,6 +145,14 @@ static unsigned char s_unprov[KLIN_GD32V_BLE_UNPROV_MAX][16];
 static int s_unprov_count;
 static volatile int s_mesh_node_added;
 static uint16_t s_mesh_last_added_addr;
+/* Friend / LPN (`@v0.13.0`). */
+static int s_mesh_lpn_on;
+static int s_mesh_lpn_established;
+static uint16_t s_mesh_lpn_friend_addr;
+static int s_mesh_lpn_changed;
+static int s_mesh_friend_established;
+static uint16_t s_mesh_friend_lpn_addr;
+static int s_mesh_friend_changed;
 
 /* Server GATT table (max KLIN_GD32V_BLE_GATT_SVC_MAX). Built before init. */
 static klin_gd32v_ble_gatt_slot_t s_slots[KLIN_GD32V_BLE_GATT_SVC_MAX];
@@ -209,6 +224,13 @@ static void klin_gd32v_ble_mesh_state_reset(void)
     memset(s_unprov, 0, sizeof(s_unprov));
     s_mesh_node_added = 0;
     s_mesh_last_added_addr = 0;
+    s_mesh_lpn_on = 0;
+    s_mesh_lpn_established = 0;
+    s_mesh_lpn_friend_addr = 0;
+    s_mesh_lpn_changed = 0;
+    s_mesh_friend_established = 0;
+    s_mesh_friend_lpn_addr = 0;
+    s_mesh_friend_changed = 0;
 }
 
 static void klin_gd32v_ble_slots_ensure_default(void)
@@ -1496,6 +1518,76 @@ static const struct bt_mesh_prov s_mesh_prov = {
     .complete = klin_gd32v_ble_mesh_prov_complete,
 };
 
+#if defined(KLIN_GD32V_BLE_HAVE_MESH_LPN)
+static void klin_gd32v_ble_lpn_established(uint16_t net_idx, uint16_t friend_addr,
+                                           uint8_t queue_size, uint8_t recv_window)
+{
+    (void)net_idx;
+    (void)queue_size;
+    (void)recv_window;
+    s_mesh_lpn_established = 1;
+    s_mesh_lpn_friend_addr = friend_addr;
+    s_mesh_lpn_changed = 1;
+}
+
+static void klin_gd32v_ble_lpn_terminated(uint16_t net_idx, uint16_t friend_addr)
+{
+    (void)net_idx;
+    (void)friend_addr;
+    s_mesh_lpn_established = 0;
+    s_mesh_lpn_friend_addr = 0;
+    s_mesh_lpn_changed = 1;
+}
+
+#if defined(CONFIG_MESH_CB_REGISTERED) && (CONFIG_MESH_CB_REGISTERED)
+static struct bt_mesh_lpn_cb s_klin_lpn_cb = {
+    .established = klin_gd32v_ble_lpn_established,
+    .terminated = klin_gd32v_ble_lpn_terminated,
+    .polled = NULL,
+};
+#else
+BT_MESH_LPN_CB_DEFINE(klin) = {
+    .established = klin_gd32v_ble_lpn_established,
+    .terminated = klin_gd32v_ble_lpn_terminated,
+};
+#endif
+#endif /* HAVE_MESH_LPN */
+
+#if defined(KLIN_GD32V_BLE_HAVE_MESH_FRIEND)
+static void klin_gd32v_ble_friend_established(uint16_t net_idx, uint16_t lpn_addr,
+                                              uint8_t recv_delay, uint32_t polltimeout)
+{
+    (void)net_idx;
+    (void)recv_delay;
+    (void)polltimeout;
+    s_mesh_friend_established = 1;
+    s_mesh_friend_lpn_addr = lpn_addr;
+    s_mesh_friend_changed = 1;
+}
+
+static void klin_gd32v_ble_friend_terminated(uint16_t net_idx, uint16_t lpn_addr)
+{
+    (void)net_idx;
+    (void)lpn_addr;
+    s_mesh_friend_established = 0;
+    s_mesh_friend_lpn_addr = 0;
+    s_mesh_friend_changed = 1;
+}
+
+#if defined(CONFIG_MESH_CB_REGISTERED) && (CONFIG_MESH_CB_REGISTERED)
+static struct bt_mesh_friend_cb s_klin_friend_cb = {
+    .established = klin_gd32v_ble_friend_established,
+    .terminated = klin_gd32v_ble_friend_terminated,
+    .polled = NULL,
+};
+#else
+BT_MESH_FRIEND_CB_DEFINE(klin) = {
+    .established = klin_gd32v_ble_friend_established,
+    .terminated = klin_gd32v_ble_friend_terminated,
+};
+#endif
+#endif /* HAVE_MESH_FRIEND */
+
 int klin_gd32v_ble_mesh_enable(void)
 {
     int err;
@@ -1528,6 +1620,13 @@ int klin_gd32v_ble_mesh_enable(void)
     }
     s_mesh_inited = 1;
     s_mesh_on = 1;
+
+#if defined(KLIN_GD32V_BLE_HAVE_MESH_LPN) && defined(CONFIG_MESH_CB_REGISTERED) && (CONFIG_MESH_CB_REGISTERED)
+    bt_mesh_lpn_cb_register(&s_klin_lpn_cb);
+#endif
+#if defined(KLIN_GD32V_BLE_HAVE_MESH_FRIEND) && defined(CONFIG_MESH_CB_REGISTERED) && (CONFIG_MESH_CB_REGISTERED)
+    bt_mesh_friend_cb_register(&s_klin_friend_cb);
+#endif
 
     if (bt_mesh_is_provisioned()) {
         s_mesh_primary = bt_mesh_primary_addr();
@@ -1667,6 +1766,13 @@ int klin_gd32v_ble_mesh_reset(void)
     s_mesh_level_changed = 0;
     s_mesh_vnd = 0;
     s_mesh_vnd_changed = 0;
+    s_mesh_lpn_on = 0;
+    s_mesh_lpn_established = 0;
+    s_mesh_lpn_friend_addr = 0;
+    s_mesh_lpn_changed = 0;
+    s_mesh_friend_established = 0;
+    s_mesh_friend_lpn_addr = 0;
+    s_mesh_friend_changed = 0;
     err = bt_mesh_prov_enable(BT_MESH_PROV_ADV | BT_MESH_PROV_GATT);
     if (err) {
         return -1;
@@ -1674,6 +1780,121 @@ int klin_gd32v_ble_mesh_reset(void)
     return 0;
 }
 
+int klin_gd32v_ble_mesh_lpn_supported(void)
+{
+#if defined(KLIN_GD32V_BLE_HAVE_MESH_LPN)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int klin_gd32v_ble_mesh_friend_supported(void)
+{
+#if defined(KLIN_GD32V_BLE_HAVE_MESH_FRIEND)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int klin_gd32v_ble_mesh_lpn_set(int enable)
+{
+#if defined(KLIN_GD32V_BLE_HAVE_MESH_LPN)
+    int err;
+
+    if (!s_mesh_inited || s_mesh_provisioner) {
+        return -1;
+    }
+    err = bt_mesh_lpn_set(enable ? true : false);
+    if (err) {
+        return -1;
+    }
+    s_mesh_lpn_on = enable ? 1 : 0;
+    if (!enable) {
+        s_mesh_lpn_established = 0;
+        s_mesh_lpn_friend_addr = 0;
+        s_mesh_lpn_changed = 1;
+    }
+    return 0;
+#else
+    (void)enable;
+    return -1;
+#endif
+}
+
+int klin_gd32v_ble_mesh_lpn(void)
+{
+    return s_mesh_lpn_on ? 1 : 0;
+}
+
+int klin_gd32v_ble_mesh_lpn_poll(void)
+{
+#if defined(KLIN_GD32V_BLE_HAVE_MESH_LPN)
+    int err;
+
+    if (!s_mesh_inited || !s_mesh_lpn_on) {
+        return -1;
+    }
+    err = bt_mesh_lpn_poll();
+    return err ? -1 : 0;
+#else
+    return -1;
+#endif
+}
+
+int klin_gd32v_ble_mesh_lpn_established(void)
+{
+    return s_mesh_lpn_established ? 1 : 0;
+}
+
+int klin_gd32v_ble_mesh_lpn_friend_addr(void)
+{
+    return s_mesh_lpn_established ? (int)s_mesh_lpn_friend_addr : 0;
+}
+
+int klin_gd32v_ble_mesh_lpn_changed(void)
+{
+    int c = s_mesh_lpn_changed;
+    s_mesh_lpn_changed = 0;
+    return c;
+}
+
+int klin_gd32v_ble_mesh_friend_established(void)
+{
+    return s_mesh_friend_established ? 1 : 0;
+}
+
+int klin_gd32v_ble_mesh_friend_lpn_addr(void)
+{
+    return s_mesh_friend_established ? (int)s_mesh_friend_lpn_addr : 0;
+}
+
+int klin_gd32v_ble_mesh_friend_terminate(int lpn_addr)
+{
+#if defined(KLIN_GD32V_BLE_HAVE_MESH_FRIEND)
+    int err;
+
+    if (!s_mesh_inited || s_mesh_provisioner) {
+        return -1;
+    }
+    if (lpn_addr <= 0 || lpn_addr > 0xFFFF) {
+        return -1;
+    }
+    err = bt_mesh_friend_terminate((uint16_t)lpn_addr);
+    return err ? -1 : 0;
+#else
+    (void)lpn_addr;
+    return -1;
+#endif
+}
+
+int klin_gd32v_ble_mesh_friend_changed(void)
+{
+    int c = s_mesh_friend_changed;
+    s_mesh_friend_changed = 0;
+    return c;
+}
 
 #if defined(KLIN_GD32V_BLE_HAVE_MESH_PROVISIONER)
 
@@ -1996,9 +2217,18 @@ int klin_gd32v_ble_mesh_reset(void)
     return -1;
 }
 
-#endif /* KLIN_GD32V_BLE_HAVE_MESH */
-
-
+int klin_gd32v_ble_mesh_lpn_supported(void) { return 0; }
+int klin_gd32v_ble_mesh_friend_supported(void) { return 0; }
+int klin_gd32v_ble_mesh_lpn_set(int enable) { (void)enable; return -1; }
+int klin_gd32v_ble_mesh_lpn(void) { return 0; }
+int klin_gd32v_ble_mesh_lpn_poll(void) { return -1; }
+int klin_gd32v_ble_mesh_lpn_established(void) { return 0; }
+int klin_gd32v_ble_mesh_lpn_friend_addr(void) { return 0; }
+int klin_gd32v_ble_mesh_lpn_changed(void) { return 0; }
+int klin_gd32v_ble_mesh_friend_established(void) { return 0; }
+int klin_gd32v_ble_mesh_friend_lpn_addr(void) { return 0; }
+int klin_gd32v_ble_mesh_friend_terminate(int lpn_addr) { (void)lpn_addr; return -1; }
+int klin_gd32v_ble_mesh_friend_changed(void) { return 0; }
 
 int klin_gd32v_ble_mesh_provisioner_enable(void) { return -1; }
 int klin_gd32v_ble_mesh_provisioner_enabled(void) { return 0; }
@@ -2012,6 +2242,10 @@ int klin_gd32v_ble_mesh_prov_gatt(int index, int addr, int timeout_ms)
 { (void)index; (void)addr; (void)timeout_ms; return -1; }
 int klin_gd32v_ble_mesh_cdb_count(void) { return 0; }
 int klin_gd32v_ble_mesh_cdb_addr(int index) { (void)index; return 0; }
+
+#endif /* KLIN_GD32V_BLE_HAVE_MESH */
+
+
 
 #else /* host stubs — no SDK headers */
 
@@ -2381,6 +2615,14 @@ int klin_gd32v_ble_mesh_enable(void)
     s_mesh_on = 1;
     s_mesh_inited = 1;
     s_mesh_primary = 2;
+    /* Host stub: Friend feature is ready; one fake LPN friendship. */
+    s_mesh_friend_established = 1;
+    s_mesh_friend_lpn_addr = 3;
+    s_mesh_friend_changed = 1;
+    s_mesh_lpn_on = 0;
+    s_mesh_lpn_established = 0;
+    s_mesh_lpn_friend_addr = 0;
+    s_mesh_lpn_changed = 0;
     return 0;
 }
 
@@ -2491,9 +2733,114 @@ int klin_gd32v_ble_mesh_reset(void)
     s_mesh_level_changed = 0;
     s_mesh_vnd = 0;
     s_mesh_vnd_changed = 0;
+    s_mesh_lpn_on = 0;
+    s_mesh_lpn_established = 0;
+    s_mesh_lpn_friend_addr = 0;
+    s_mesh_lpn_changed = 0;
+    s_mesh_friend_established = 0;
+    s_mesh_friend_lpn_addr = 0;
+    s_mesh_friend_changed = 0;
     return 0;
 }
 
+int klin_gd32v_ble_mesh_lpn_supported(void)
+{
+    return 1;
+}
+
+int klin_gd32v_ble_mesh_friend_supported(void)
+{
+    return 1;
+}
+
+int klin_gd32v_ble_mesh_lpn_set(int enable)
+{
+    if (!s_mesh_inited || s_mesh_provisioner) {
+        return -1;
+    }
+    s_mesh_lpn_on = enable ? 1 : 0;
+    if (enable) {
+        /* Host stub: LPN finds a Friend; Friend role clears (one role at a time). */
+        s_mesh_friend_established = 0;
+        s_mesh_friend_lpn_addr = 0;
+        s_mesh_friend_changed = 1;
+        s_mesh_lpn_established = 1;
+        s_mesh_lpn_friend_addr = 1;
+        s_mesh_lpn_changed = 1;
+    } else {
+        s_mesh_lpn_established = 0;
+        s_mesh_lpn_friend_addr = 0;
+        s_mesh_lpn_changed = 1;
+        s_mesh_friend_established = 1;
+        s_mesh_friend_lpn_addr = 3;
+        s_mesh_friend_changed = 1;
+    }
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_lpn(void)
+{
+    return s_mesh_lpn_on ? 1 : 0;
+}
+
+int klin_gd32v_ble_mesh_lpn_poll(void)
+{
+    if (!s_mesh_inited || !s_mesh_lpn_on || !s_mesh_lpn_established) {
+        return -1;
+    }
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_lpn_established(void)
+{
+    return s_mesh_lpn_established ? 1 : 0;
+}
+
+int klin_gd32v_ble_mesh_lpn_friend_addr(void)
+{
+    return s_mesh_lpn_established ? (int)s_mesh_lpn_friend_addr : 0;
+}
+
+int klin_gd32v_ble_mesh_lpn_changed(void)
+{
+    int c = s_mesh_lpn_changed;
+    s_mesh_lpn_changed = 0;
+    return c;
+}
+
+int klin_gd32v_ble_mesh_friend_established(void)
+{
+    return s_mesh_friend_established ? 1 : 0;
+}
+
+int klin_gd32v_ble_mesh_friend_lpn_addr(void)
+{
+    return s_mesh_friend_established ? (int)s_mesh_friend_lpn_addr : 0;
+}
+
+int klin_gd32v_ble_mesh_friend_terminate(int lpn_addr)
+{
+    if (!s_mesh_inited || s_mesh_provisioner) {
+        return -1;
+    }
+    if (!s_mesh_friend_established) {
+        return -1;
+    }
+    if (lpn_addr <= 0 || lpn_addr != (int)s_mesh_friend_lpn_addr) {
+        return -1;
+    }
+    s_mesh_friend_established = 0;
+    s_mesh_friend_lpn_addr = 0;
+    s_mesh_friend_changed = 1;
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_friend_changed(void)
+{
+    int c = s_mesh_friend_changed;
+    s_mesh_friend_changed = 0;
+    return c;
+}
 
 int klin_gd32v_ble_mesh_provisioner_enable(void)
 {
