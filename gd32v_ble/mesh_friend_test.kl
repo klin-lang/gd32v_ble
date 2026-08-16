@@ -26,6 +26,8 @@ fn test_friend_after_mesh_enable() {
     }
     testing.assert_eq_i32(fe, 1)
     testing.assert_eq_i32(mesh_friend_lpn_addr(), 3)
+    testing.assert_eq_i32(mesh_friend_recv_delay(), 10)
+    testing.assert_eq_i32(mesh_friend_poll_timeout(), 100)
     ch = 0
     if mesh_friend_changed() {
         ch = 1
@@ -61,6 +63,8 @@ fn test_lpn_set_establishes() {
     }
     testing.assert_eq_i32(le, 1)
     testing.assert_eq_i32(mesh_lpn_friend_addr(), 1)
+    testing.assert_eq_i32(mesh_lpn_queue_size(), 4)
+    testing.assert_eq_i32(mesh_lpn_recv_window(), 5)
     ch = 0
     if mesh_lpn_changed() {
         ch = 1

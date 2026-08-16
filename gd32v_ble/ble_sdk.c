@@ -17,6 +17,7 @@
  * Level/vendor (`@v0.12.0`): Gen Level + vendor button on mesh_enable node.
  * Friend/LPN (`@v0.13.0`): `mesh_lpn_*` / `mesh_friend_*` when SDK CONFIG_BT_MESH_LOW_POWER / FRIEND.
  * Interactive OOB (`@v0.14.0`): `mesh_oob_auth_*` / `mesh_oob_input_number` / non-blocking `mesh_prov_*_begin`.
+ * Mesh extras (`@v0.15.0`): string OOB + friendship params + vendor byte model.
  */
 #include "ble_sdk.h"
 
@@ -142,26 +143,33 @@ static int s_mesh_level_changed;
 static uint8_t s_mesh_vnd; /* 0 released / 1 pressed */
 static int s_mesh_vnd_changed;
 static uint32_t s_mesh_oob;
-/* Interactive OOB (`@v0.14.0`): 0=none 1=output 2=input 3=static. */
+/* Interactive OOB (`@v0.14.0`/`@v0.15.0`): 0=none 1=out-num 2=in-num 3=static 4=out-str 5=in-str. */
 static int s_mesh_oob_auth;
-static int s_mesh_oob_action; /* 0 idle, 1 display number, 2 enter number */
+static int s_mesh_oob_action; /* 0 idle, 1 disp num, 2 enter num, 3 disp str, 4 enter str */
 static int s_mesh_oob_changed;
 static uint8_t s_mesh_static_oob[16];
 static uint8_t s_mesh_static_oob_len;
+static char s_mesh_oob_str[17];
 static int s_mesh_prov_busy;
 static int s_mesh_oob_stub_ticks; /* host-stub only helper */
 static unsigned char s_unprov[KLIN_GD32V_BLE_UNPROV_MAX][16];
 static int s_unprov_count;
 static volatile int s_mesh_node_added;
 static uint16_t s_mesh_last_added_addr;
-/* Friend / LPN (`@v0.13.0`). */
+/* Friend / LPN (`@v0.13.0`/`@v0.15.0`). */
 static int s_mesh_lpn_on;
 static int s_mesh_lpn_established;
 static uint16_t s_mesh_lpn_friend_addr;
 static int s_mesh_lpn_changed;
+static uint8_t s_mesh_lpn_queue_size;
+static uint8_t s_mesh_lpn_recv_window;
 static int s_mesh_friend_established;
 static uint16_t s_mesh_friend_lpn_addr;
 static int s_mesh_friend_changed;
+static uint8_t s_mesh_friend_recv_delay;
+static uint32_t s_mesh_friend_poll_timeout;
+static uint8_t s_mesh_vnd_byte;
+static int s_mesh_vnd_byte_changed;
 
 /* Server GATT table (max KLIN_GD32V_BLE_GATT_SVC_MAX). Built before init. */
 static klin_gd32v_ble_gatt_slot_t s_slots[KLIN_GD32V_BLE_GATT_SVC_MAX];
@@ -234,6 +242,7 @@ static void klin_gd32v_ble_mesh_state_reset(void)
     s_mesh_oob_changed = 0;
     s_mesh_static_oob_len = 0;
     memset(s_mesh_static_oob, 0, sizeof(s_mesh_static_oob));
+    memset(s_mesh_oob_str, 0, sizeof(s_mesh_oob_str));
     s_mesh_prov_busy = 0;
     s_mesh_oob_stub_ticks = 0;
     s_unprov_count = 0;
@@ -244,9 +253,15 @@ static void klin_gd32v_ble_mesh_state_reset(void)
     s_mesh_lpn_established = 0;
     s_mesh_lpn_friend_addr = 0;
     s_mesh_lpn_changed = 0;
+    s_mesh_lpn_queue_size = 0;
+    s_mesh_lpn_recv_window = 0;
     s_mesh_friend_established = 0;
     s_mesh_friend_lpn_addr = 0;
     s_mesh_friend_changed = 0;
+    s_mesh_friend_recv_delay = 0;
+    s_mesh_friend_poll_timeout = 0;
+    s_mesh_vnd_byte = 0;
+    s_mesh_vnd_byte_changed = 0;
 }
 
 static void klin_gd32v_ble_slots_ensure_default(void)
@@ -1413,8 +1428,11 @@ BT_MESH_MODEL_PUB_DEFINE(s_mesh_level_pub, NULL, 5);
 
 #define KLIN_MESH_VND_CID 0x05f1
 #define KLIN_MESH_VND_MOD 0x0000
+#define KLIN_MESH_VND_MOD_BYTE 0x0001
 #define KLIN_MESH_OP_VND_PRESSED  BT_MESH_MODEL_OP_3(0x00, KLIN_MESH_VND_CID)
 #define KLIN_MESH_OP_VND_RELEASED BT_MESH_MODEL_OP_3(0x01, KLIN_MESH_VND_CID)
+#define KLIN_MESH_OP_VND_BYTE_SET BT_MESH_MODEL_OP_3(0x10, KLIN_MESH_VND_CID)
+#define KLIN_MESH_OOB_STR_MAX 16
 
 static void klin_gd32v_ble_mesh_onoff_cb(void *user_data,
                                         enum bt_mesh_srv_callback_evt evt,
@@ -1484,9 +1502,28 @@ static int klin_gd32v_ble_mesh_vnd_released(const struct bt_mesh_model *model,
     return 0;
 }
 
+static int klin_gd32v_ble_mesh_vnd_byte_set_op(const struct bt_mesh_model *model,
+                                               struct bt_mesh_msg_ctx *ctx,
+                                               struct net_buf_simple *buf)
+{
+    (void)model;
+    (void)ctx;
+    if (buf == NULL || buf->len < 1) {
+        return -1;
+    }
+    s_mesh_vnd_byte = buf->data[0];
+    s_mesh_vnd_byte_changed = 1;
+    return 0;
+}
+
 static const struct bt_mesh_model_op s_mesh_vnd_ops[] = {
     {KLIN_MESH_OP_VND_PRESSED, BT_MESH_LEN_EXACT(0), klin_gd32v_ble_mesh_vnd_pressed},
     {KLIN_MESH_OP_VND_RELEASED, BT_MESH_LEN_EXACT(0), klin_gd32v_ble_mesh_vnd_released},
+    BT_MESH_MODEL_OP_END,
+};
+
+static const struct bt_mesh_model_op s_mesh_vnd_byte_ops[] = {
+    {KLIN_MESH_OP_VND_BYTE_SET, BT_MESH_LEN_EXACT(1), klin_gd32v_ble_mesh_vnd_byte_set_op},
     BT_MESH_MODEL_OP_END,
 };
 
@@ -1500,6 +1537,8 @@ static const struct bt_mesh_model s_mesh_root_models[] = {
 static const struct bt_mesh_model s_mesh_vnd_models[] = {
     BT_MESH_MODEL_VND_CB(KLIN_MESH_VND_CID, KLIN_MESH_VND_MOD, s_mesh_vnd_ops, NULL, NULL,
                          NULL),
+    BT_MESH_MODEL_VND_CB(KLIN_MESH_VND_CID, KLIN_MESH_VND_MOD_BYTE, s_mesh_vnd_byte_ops, NULL,
+                         NULL, NULL),
 };
 
 static const struct bt_mesh_elem s_mesh_elements[] = {
@@ -1523,16 +1562,37 @@ static int klin_gd32v_ble_mesh_output_number(bt_mesh_output_action_t action,
 {
     (void)action;
     s_mesh_oob = number;
-    s_mesh_oob_action = 1; /* display */
+    s_mesh_oob_action = 1; /* display number */
+    s_mesh_oob_changed = 1;
+    return 0;
+}
+
+static int klin_gd32v_ble_mesh_output_string(const char *str)
+{
+    size_t n;
+
+    if (str == NULL) {
+        return -1;
+    }
+    n = strlen(str);
+    if (n > KLIN_MESH_OOB_STR_MAX) {
+        n = KLIN_MESH_OOB_STR_MAX;
+    }
+    memcpy(s_mesh_oob_str, str, n);
+    s_mesh_oob_str[n] = '\0';
+    s_mesh_oob_action = 3; /* display string */
     s_mesh_oob_changed = 1;
     return 0;
 }
 
 static int klin_gd32v_ble_mesh_input(bt_mesh_input_action_t action, uint8_t size)
 {
-    (void)action;
     (void)size;
-    s_mesh_oob_action = 2; /* enter */
+    if (action == BT_MESH_ENTER_STRING) {
+        s_mesh_oob_action = 4; /* enter string */
+    } else {
+        s_mesh_oob_action = 2; /* enter number */
+    }
     s_mesh_oob_changed = 1;
     return 0;
 }
@@ -1548,10 +1608,11 @@ static struct bt_mesh_prov s_mesh_prov = {
     .static_val = s_mesh_static_oob,
     .static_val_len = 0,
     .output_size = 6,
-    .output_actions = BT_MESH_DISPLAY_NUMBER,
-    .input_size = 6,
-    .input_actions = BT_MESH_ENTER_NUMBER,
+    .output_actions = (BT_MESH_DISPLAY_NUMBER | BT_MESH_DISPLAY_STRING),
+    .input_size = 8,
+    .input_actions = (BT_MESH_ENTER_NUMBER | BT_MESH_ENTER_STRING),
     .output_number = klin_gd32v_ble_mesh_output_number,
+    .output_string = klin_gd32v_ble_mesh_output_string,
     .input = klin_gd32v_ble_mesh_input,
     .input_complete = klin_gd32v_ble_mesh_input_complete,
     .complete = klin_gd32v_ble_mesh_prov_complete,
@@ -1562,10 +1623,10 @@ static void klin_gd32v_ble_lpn_established(uint16_t net_idx, uint16_t friend_add
                                            uint8_t queue_size, uint8_t recv_window)
 {
     (void)net_idx;
-    (void)queue_size;
-    (void)recv_window;
     s_mesh_lpn_established = 1;
     s_mesh_lpn_friend_addr = friend_addr;
+    s_mesh_lpn_queue_size = queue_size;
+    s_mesh_lpn_recv_window = recv_window;
     s_mesh_lpn_changed = 1;
 }
 
@@ -1575,6 +1636,8 @@ static void klin_gd32v_ble_lpn_terminated(uint16_t net_idx, uint16_t friend_addr
     (void)friend_addr;
     s_mesh_lpn_established = 0;
     s_mesh_lpn_friend_addr = 0;
+    s_mesh_lpn_queue_size = 0;
+    s_mesh_lpn_recv_window = 0;
     s_mesh_lpn_changed = 1;
 }
 
@@ -1597,10 +1660,10 @@ static void klin_gd32v_ble_friend_established(uint16_t net_idx, uint16_t lpn_add
                                               uint8_t recv_delay, uint32_t polltimeout)
 {
     (void)net_idx;
-    (void)recv_delay;
-    (void)polltimeout;
     s_mesh_friend_established = 1;
     s_mesh_friend_lpn_addr = lpn_addr;
+    s_mesh_friend_recv_delay = recv_delay;
+    s_mesh_friend_poll_timeout = polltimeout;
     s_mesh_friend_changed = 1;
 }
 
@@ -1610,6 +1673,8 @@ static void klin_gd32v_ble_friend_terminated(uint16_t net_idx, uint16_t lpn_addr
     (void)lpn_addr;
     s_mesh_friend_established = 0;
     s_mesh_friend_lpn_addr = 0;
+    s_mesh_friend_recv_delay = 0;
+    s_mesh_friend_poll_timeout = 0;
     s_mesh_friend_changed = 1;
 }
 
@@ -1785,6 +1850,31 @@ int klin_gd32v_ble_mesh_vnd_changed(void)
     return c;
 }
 
+int klin_gd32v_ble_mesh_vnd_byte(void)
+{
+    return (int)s_mesh_vnd_byte;
+}
+
+int klin_gd32v_ble_mesh_vnd_byte_set(int value)
+{
+    if (!s_mesh_inited || s_mesh_provisioner) {
+        return -1;
+    }
+    if (value < 0 || value > 255) {
+        return -1;
+    }
+    s_mesh_vnd_byte = (uint8_t)value;
+    s_mesh_vnd_byte_changed = 1;
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_vnd_byte_changed(void)
+{
+    int c = s_mesh_vnd_byte_changed;
+    s_mesh_vnd_byte_changed = 0;
+    return c;
+}
+
 int klin_gd32v_ble_mesh_oob_number(void)
 {
     return (int)s_mesh_oob;
@@ -1792,7 +1882,7 @@ int klin_gd32v_ble_mesh_oob_number(void)
 
 int klin_gd32v_ble_mesh_oob_auth_set(int mode)
 {
-    if (mode < 0 || mode > 3) {
+    if (mode < 0 || mode > 5) {
         return -1;
     }
     if (mode == 3 && s_mesh_static_oob_len == 0) {
@@ -1839,6 +1929,41 @@ int klin_gd32v_ble_mesh_oob_input_number(int number)
         return -1;
     }
     err = bt_mesh_input_number((uint32_t)number);
+    if (err) {
+        return -1;
+    }
+    s_mesh_oob_action = 0;
+    s_mesh_oob_changed = 1;
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_oob_string(char *out, int max_len)
+{
+    size_t n;
+
+    if (out == NULL || max_len <= 0) {
+        return -1;
+    }
+    n = strlen(s_mesh_oob_str);
+    if ((int)n >= max_len) {
+        n = (size_t)(max_len - 1);
+    }
+    memcpy(out, s_mesh_oob_str, n);
+    out[n] = '\0';
+    return (int)n;
+}
+
+int klin_gd32v_ble_mesh_oob_input_string(const char *str)
+{
+    int err;
+
+    if (!s_mesh_inited || str == NULL || str[0] == '\0') {
+        return -1;
+    }
+    if (s_mesh_oob_action != 4) {
+        return -1;
+    }
+    err = bt_mesh_input_string(str);
     if (err) {
         return -1;
     }
@@ -1960,6 +2085,16 @@ int klin_gd32v_ble_mesh_lpn_friend_addr(void)
     return s_mesh_lpn_established ? (int)s_mesh_lpn_friend_addr : 0;
 }
 
+int klin_gd32v_ble_mesh_lpn_queue_size(void)
+{
+    return s_mesh_lpn_established ? (int)s_mesh_lpn_queue_size : 0;
+}
+
+int klin_gd32v_ble_mesh_lpn_recv_window(void)
+{
+    return s_mesh_lpn_established ? (int)s_mesh_lpn_recv_window : 0;
+}
+
 int klin_gd32v_ble_mesh_lpn_changed(void)
 {
     int c = s_mesh_lpn_changed;
@@ -1975,6 +2110,16 @@ int klin_gd32v_ble_mesh_friend_established(void)
 int klin_gd32v_ble_mesh_friend_lpn_addr(void)
 {
     return s_mesh_friend_established ? (int)s_mesh_friend_lpn_addr : 0;
+}
+
+int klin_gd32v_ble_mesh_friend_recv_delay(void)
+{
+    return s_mesh_friend_established ? (int)s_mesh_friend_recv_delay : 0;
+}
+
+int klin_gd32v_ble_mesh_friend_poll_timeout(void)
+{
+    return s_mesh_friend_established ? (int)s_mesh_friend_poll_timeout : 0;
 }
 
 int klin_gd32v_ble_mesh_friend_terminate(int lpn_addr)
@@ -2097,6 +2242,18 @@ static void klin_gd32v_ble_mesh_prov_caps(const struct bt_mesh_dev_capabilities 
         if (bt_mesh_auth_method_set_input(BT_MESH_ENTER_NUMBER, size) == 0) {
             return;
         }
+    } else if (s_mesh_oob_auth == 4 && cap != NULL &&
+               (cap->output_actions & BT_MESH_DISPLAY_STRING) != 0 && cap->output_size > 0) {
+        size = cap->output_size > 8 ? 8 : cap->output_size;
+        if (bt_mesh_auth_method_set_output(BT_MESH_DISPLAY_STRING, size) == 0) {
+            return;
+        }
+    } else if (s_mesh_oob_auth == 5 && cap != NULL &&
+               (cap->input_actions & BT_MESH_ENTER_STRING) != 0 && cap->input_size > 0) {
+        size = cap->input_size > 8 ? 8 : cap->input_size;
+        if (bt_mesh_auth_method_set_input(BT_MESH_ENTER_STRING, size) == 0) {
+            return;
+        }
     } else if (s_mesh_oob_auth == 3 && s_mesh_static_oob_len > 0) {
         if (bt_mesh_auth_method_set_static(s_mesh_static_oob, s_mesh_static_oob_len) == 0) {
             return;
@@ -2107,11 +2264,12 @@ static void klin_gd32v_ble_mesh_prov_caps(const struct bt_mesh_dev_capabilities 
 
 static struct bt_mesh_prov s_mesh_provisioner_prov = {
     .uuid = s_mesh_dev_uuid,
-    .output_size = 6,
-    .output_actions = BT_MESH_DISPLAY_NUMBER,
-    .input_size = 6,
-    .input_actions = BT_MESH_ENTER_NUMBER,
+    .output_size = 8,
+    .output_actions = (BT_MESH_DISPLAY_NUMBER | BT_MESH_DISPLAY_STRING),
+    .input_size = 8,
+    .input_actions = (BT_MESH_ENTER_NUMBER | BT_MESH_ENTER_STRING),
     .output_number = klin_gd32v_ble_mesh_output_number,
+    .output_string = klin_gd32v_ble_mesh_output_string,
     .input = klin_gd32v_ble_mesh_input,
     .input_complete = klin_gd32v_ble_mesh_input_complete,
     .complete = klin_gd32v_ble_mesh_prov_complete,
@@ -2398,6 +2556,9 @@ int klin_gd32v_ble_mesh_level_changed(void) { return 0; }
 int klin_gd32v_ble_mesh_vnd(void) { return 0; }
 int klin_gd32v_ble_mesh_vnd_set(int state) { (void)state; return -1; }
 int klin_gd32v_ble_mesh_vnd_changed(void) { return 0; }
+int klin_gd32v_ble_mesh_vnd_byte(void) { return 0; }
+int klin_gd32v_ble_mesh_vnd_byte_set(int value) { (void)value; return -1; }
+int klin_gd32v_ble_mesh_vnd_byte_changed(void) { return 0; }
 
 
 int klin_gd32v_ble_mesh_oob_number(void)
@@ -2411,6 +2572,9 @@ int klin_gd32v_ble_mesh_oob_static_set(const unsigned char *data, int len)
 { (void)data; (void)len; return -1; }
 int klin_gd32v_ble_mesh_oob_action(void) { return 0; }
 int klin_gd32v_ble_mesh_oob_input_number(int number) { (void)number; return -1; }
+int klin_gd32v_ble_mesh_oob_string(char *out, int max_len)
+{ (void)out; (void)max_len; return -1; }
+int klin_gd32v_ble_mesh_oob_input_string(const char *str) { (void)str; return -1; }
 int klin_gd32v_ble_mesh_oob_changed(void) { return 0; }
 
 int klin_gd32v_ble_mesh_reset(void)
@@ -2425,9 +2589,13 @@ int klin_gd32v_ble_mesh_lpn(void) { return 0; }
 int klin_gd32v_ble_mesh_lpn_poll(void) { return -1; }
 int klin_gd32v_ble_mesh_lpn_established(void) { return 0; }
 int klin_gd32v_ble_mesh_lpn_friend_addr(void) { return 0; }
+int klin_gd32v_ble_mesh_lpn_queue_size(void) { return 0; }
+int klin_gd32v_ble_mesh_lpn_recv_window(void) { return 0; }
 int klin_gd32v_ble_mesh_lpn_changed(void) { return 0; }
 int klin_gd32v_ble_mesh_friend_established(void) { return 0; }
 int klin_gd32v_ble_mesh_friend_lpn_addr(void) { return 0; }
+int klin_gd32v_ble_mesh_friend_recv_delay(void) { return 0; }
+int klin_gd32v_ble_mesh_friend_poll_timeout(void) { return 0; }
 int klin_gd32v_ble_mesh_friend_terminate(int lpn_addr) { (void)lpn_addr; return -1; }
 int klin_gd32v_ble_mesh_friend_changed(void) { return 0; }
 
@@ -2824,10 +2992,14 @@ int klin_gd32v_ble_mesh_enable(void)
     /* Host stub: Friend feature is ready; one fake LPN friendship. */
     s_mesh_friend_established = 1;
     s_mesh_friend_lpn_addr = 3;
+    s_mesh_friend_recv_delay = 10;
+    s_mesh_friend_poll_timeout = 100;
     s_mesh_friend_changed = 1;
     s_mesh_lpn_on = 0;
     s_mesh_lpn_established = 0;
     s_mesh_lpn_friend_addr = 0;
+    s_mesh_lpn_queue_size = 0;
+    s_mesh_lpn_recv_window = 0;
     s_mesh_lpn_changed = 0;
     return 0;
 }
@@ -2919,7 +3091,30 @@ int klin_gd32v_ble_mesh_vnd_changed(void)
     return c;
 }
 
+int klin_gd32v_ble_mesh_vnd_byte(void)
+{
+    return (int)s_mesh_vnd_byte;
+}
 
+int klin_gd32v_ble_mesh_vnd_byte_set(int value)
+{
+    if (!s_mesh_inited || s_mesh_provisioner) {
+        return -1;
+    }
+    if (value < 0 || value > 255) {
+        return -1;
+    }
+    s_mesh_vnd_byte = (uint8_t)value;
+    s_mesh_vnd_byte_changed = 1;
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_vnd_byte_changed(void)
+{
+    int c = s_mesh_vnd_byte_changed;
+    s_mesh_vnd_byte_changed = 0;
+    return c;
+}
 
 int klin_gd32v_ble_mesh_oob_number(void)
 {
@@ -2928,7 +3123,7 @@ int klin_gd32v_ble_mesh_oob_number(void)
 
 int klin_gd32v_ble_mesh_oob_auth_set(int mode)
 {
-    if (mode < 0 || mode > 3) {
+    if (mode < 0 || mode > 5) {
         return -1;
     }
     if (mode == 3 && s_mesh_static_oob_len == 0) {
@@ -2970,6 +3165,40 @@ int klin_gd32v_ble_mesh_oob_input_number(int number)
         return -1;
     }
     if (number < 0) {
+        return -1;
+    }
+    s_mesh_oob_action = 0;
+    s_mesh_oob_changed = 1;
+    if (s_mesh_prov_busy) {
+        s_mesh_last_added_addr = s_mesh_last_added_addr ? s_mesh_last_added_addr : 2;
+        s_mesh_node_added = 1;
+        s_mesh_prov_busy = 0;
+    }
+    return 0;
+}
+
+int klin_gd32v_ble_mesh_oob_string(char *out, int max_len)
+{
+    size_t n;
+
+    if (out == NULL || max_len <= 0) {
+        return -1;
+    }
+    n = strlen(s_mesh_oob_str);
+    if ((int)n >= max_len) {
+        n = (size_t)(max_len - 1);
+    }
+    memcpy(out, s_mesh_oob_str, n);
+    out[n] = '\0';
+    return (int)n;
+}
+
+int klin_gd32v_ble_mesh_oob_input_string(const char *str)
+{
+    if (!s_mesh_inited || str == NULL || str[0] == '\0') {
+        return -1;
+    }
+    if (s_mesh_oob_action != 4) {
         return -1;
     }
     s_mesh_oob_action = 0;
@@ -3036,16 +3265,24 @@ int klin_gd32v_ble_mesh_lpn_set(int enable)
         /* Host stub: LPN finds a Friend; Friend role clears (one role at a time). */
         s_mesh_friend_established = 0;
         s_mesh_friend_lpn_addr = 0;
+        s_mesh_friend_recv_delay = 0;
+        s_mesh_friend_poll_timeout = 0;
         s_mesh_friend_changed = 1;
         s_mesh_lpn_established = 1;
         s_mesh_lpn_friend_addr = 1;
+        s_mesh_lpn_queue_size = 4;
+        s_mesh_lpn_recv_window = 5;
         s_mesh_lpn_changed = 1;
     } else {
         s_mesh_lpn_established = 0;
         s_mesh_lpn_friend_addr = 0;
+        s_mesh_lpn_queue_size = 0;
+        s_mesh_lpn_recv_window = 0;
         s_mesh_lpn_changed = 1;
         s_mesh_friend_established = 1;
         s_mesh_friend_lpn_addr = 3;
+        s_mesh_friend_recv_delay = 10;
+        s_mesh_friend_poll_timeout = 100;
         s_mesh_friend_changed = 1;
     }
     return 0;
@@ -3074,6 +3311,16 @@ int klin_gd32v_ble_mesh_lpn_friend_addr(void)
     return s_mesh_lpn_established ? (int)s_mesh_lpn_friend_addr : 0;
 }
 
+int klin_gd32v_ble_mesh_lpn_queue_size(void)
+{
+    return s_mesh_lpn_established ? (int)s_mesh_lpn_queue_size : 0;
+}
+
+int klin_gd32v_ble_mesh_lpn_recv_window(void)
+{
+    return s_mesh_lpn_established ? (int)s_mesh_lpn_recv_window : 0;
+}
+
 int klin_gd32v_ble_mesh_lpn_changed(void)
 {
     int c = s_mesh_lpn_changed;
@@ -3091,6 +3338,16 @@ int klin_gd32v_ble_mesh_friend_lpn_addr(void)
     return s_mesh_friend_established ? (int)s_mesh_friend_lpn_addr : 0;
 }
 
+int klin_gd32v_ble_mesh_friend_recv_delay(void)
+{
+    return s_mesh_friend_established ? (int)s_mesh_friend_recv_delay : 0;
+}
+
+int klin_gd32v_ble_mesh_friend_poll_timeout(void)
+{
+    return s_mesh_friend_established ? (int)s_mesh_friend_poll_timeout : 0;
+}
+
 int klin_gd32v_ble_mesh_friend_terminate(int lpn_addr)
 {
     if (!s_mesh_inited || s_mesh_provisioner) {
@@ -3104,6 +3361,8 @@ int klin_gd32v_ble_mesh_friend_terminate(int lpn_addr)
     }
     s_mesh_friend_established = 0;
     s_mesh_friend_lpn_addr = 0;
+    s_mesh_friend_recv_delay = 0;
+    s_mesh_friend_poll_timeout = 0;
     s_mesh_friend_changed = 1;
     return 0;
 }
@@ -3207,6 +3466,15 @@ int klin_gd32v_ble_mesh_prov_adv_begin(int index, int addr)
         s_mesh_oob_action = 1;
         return 0;
     }
+    if (s_mesh_oob_auth == 4) {
+        s_mesh_oob_action = 4; /* enter string */
+        return 0;
+    }
+    if (s_mesh_oob_auth == 5) {
+        memcpy(s_mesh_oob_str, "AB12", 5);
+        s_mesh_oob_action = 3; /* display string */
+        return 0;
+    }
     /* none / static — complete immediately on host stub. */
     s_mesh_oob_action = 0;
     s_mesh_node_added = 1;
@@ -3225,8 +3493,10 @@ int klin_gd32v_ble_mesh_prov_busy(void)
         s_mesh_prov_busy = 0;
         return 0;
     }
-    if (s_mesh_prov_busy && s_mesh_oob_auth == 2 && s_mesh_oob_action == 1) {
-        /* Host stub: after Klin can read the display number, auto-complete. */
+    if (s_mesh_prov_busy &&
+        ((s_mesh_oob_auth == 2 && s_mesh_oob_action == 1) ||
+         (s_mesh_oob_auth == 5 && s_mesh_oob_action == 3))) {
+        /* Host stub: after Klin can read display number/string, auto-complete. */
         s_mesh_oob_stub_ticks++;
         if (s_mesh_oob_stub_ticks > 1) {
             s_mesh_oob_action = 0;

@@ -1,5 +1,6 @@
-// GD32VW553 BLE Mesh Friend / LPN via klin-lang/gd32v_ble @v0.13.0.
+// GD32VW553 BLE Mesh Friend / LPN via klin-lang/gd32v_ble @v0.15.0.
 // Needs SDK CONFIG_BT_MESH_FRIEND and/or CONFIG_BT_MESH_LOW_POWER (+ BLE_MAX).
+// Friendship params: mesh_lpn_queue_size / recv_window, mesh_friend_recv_delay / poll_timeout.
 //   make emit KLIN=/path/to/klin/bin/klin.dart
 import "../../gd32v_ble" ble
 
@@ -21,6 +22,8 @@ fn main() {
         while true {
             if ble.mesh_friend_changed() {
                 let _a = ble.mesh_friend_lpn_addr()
+                let _d = ble.mesh_friend_recv_delay()
+                let _p = ble.mesh_friend_poll_timeout()
             }
             let mut i: i32 = 0
             while i < 20000000 {
@@ -32,6 +35,8 @@ fn main() {
     while true {
         if ble.mesh_lpn_changed() {
             if ble.mesh_lpn_established() {
+                let _q = ble.mesh_lpn_queue_size()
+                let _w = ble.mesh_lpn_recv_window()
                 let _ = ble.mesh_lpn_poll()
             }
         }

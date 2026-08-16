@@ -4,7 +4,8 @@ Thin **GigaDevice VW55x BLE** bindings for [Klin](https://github.com/klin-lang/k
 (**peripheral advertise** + **GATT server** + **central scan/connect** +
 **GATT client** + **Just Works bonding** + **custom UUID16/128** + **multi-service**
 + **passkey/PIN** + **LE privacy / RPA** + **Mesh Gen OnOff** + **Mesh provisioner** +
-**Gen Level / vendor** + **Friend / LPN** + **interactive OOB**).
+**Gen Level / vendor** + **Friend / LPN** + **interactive OOB** + **string OOB** +
+**friendship params** + **vendor byte**).
 
 The radio is in the **silicon**; this package does **not** belong in
 [`machine_gd32v`](https://github.com/klin-lang/machine_gd32v) (MMIO Pin…Adc).
@@ -24,14 +25,18 @@ not hidden Klin allocation.
 Wi‑Fi is [`gd32v_wifi`](https://github.com/klin-lang/gd32v_wifi). Do **not**
 put BLE in a board pack.
 
-## Status (`@v0.14.0`)
+## Status (`@v0.15.0`)
 
 | API | Notes |
 |---|---|
-| `mesh_oob_auth_set` / `mesh_oob_auth` | 0=none, 1=output, 2=input, 3=static |
+| `mesh_oob_auth_set` / `mesh_oob_auth` | 0=none, 1=out num, 2=in num, 3=static, 4=out string, 5=in string |
+| `mesh_oob_string` / `mesh_oob_input_string` | String OOB display / inject (actions 3 / 4) |
 | `mesh_oob_static_set` | Static OOB bytes (1..=16) |
 | `mesh_oob_action` / `mesh_oob_input_number` / `mesh_oob_changed` | Interactive poll + inject |
 | `mesh_prov_adv_begin` / `mesh_prov_gatt_begin` / `mesh_prov_busy` | Non-blocking provision |
+| `mesh_lpn_queue_size` / `mesh_lpn_recv_window` | LPN friendship param readouts |
+| `mesh_friend_recv_delay` / `mesh_friend_poll_timeout` | Friend friendship param readouts |
+| `mesh_vnd_byte*` | Second vendor model (cid 0x05f1, id 0x0001) |
 | `mesh_lpn_*` / `mesh_friend_*` | LPN set/poll + Friend terminate; needs LOW_POWER / FRIEND |
 | `mesh_provisioner_enable` | CDB + self-provision (addr 1); exclusive with `mesh_enable` |
 | `mesh_unprov_*` / `mesh_prov_adv` / `mesh_prov_gatt` | Unprov UUID table + blocking PB-ADV/GATT |
@@ -39,7 +44,7 @@ put BLE in a board pack.
 | Prior APIs | privacy / GATT / bond / UUID / scan / … |
 | `err_ok` | 0 |
 
-`version()` → `14`.
+`version()` → `15`.
 
 Host `klin test` uses stubs when `ble_init.h` is not on the include path.
 
@@ -47,10 +52,35 @@ Host `klin test` uses stubs when `ble_init.h` is not on the include path.
 **Mesh provisioner** also needs `CONFIG_BT_MESH_PROVISIONER` + `CONFIG_BT_MESH_CDB`
 (like SDK `provisioner` example). Without those, `mesh_provisioner_enable` → `-1`.
 
+Friend **queue depth** stays an SDK compile-time CONFIG — Klin only exposes negotiated
+friendship parameters after establish (no runtime queue-size setter in the SDK).
+
 Default auth is **none**. Interactive OOB uses `mesh_oob_auth_set` +
 `mesh_prov_*_begin` (blocking `mesh_prov_adv`/`gatt` stay for none/static).
 
-## Usage (interactive OOB)
+## Usage (string OOB)
+
+```klin
+import "github/klin-lang/gd32v_ble" ble
+
+fn main() {
+    let mut e = ble.init()
+    e = ble.mesh_provisioner_enable()
+    e = ble.mesh_oob_auth_set(4) // output string: device displays → we enter (action 4)
+    e = ble.mesh_prov_adv_begin(0, 2)
+    while ble.mesh_prov_busy() {
+        if ble.mesh_oob_action() == 4 {
+            e = ble.mesh_oob_input_string("AB12") // string shown on the device
+        }
+    }
+}
+```
+
+```sh
+klin get github/klin-lang/gd32v_ble@v0.15.0
+```
+
+## Usage (interactive number OOB)
 
 ```klin
 import "github/klin-lang/gd32v_ble" ble
@@ -66,10 +96,6 @@ fn main() {
         }
     }
 }
-```
-
-```sh
-klin get github/klin-lang/gd32v_ble@v0.14.0
 ```
 
 ## Usage (Mesh provisioner)
@@ -97,6 +123,10 @@ fn main() {
     e = ble.mesh_enable()
     if ble.mesh_lpn_supported() {
         e = ble.mesh_lpn_set(1)
+        if ble.mesh_lpn_established() {
+            let _q = ble.mesh_lpn_queue_size()
+            let _w = ble.mesh_lpn_recv_window()
+        }
     }
 }
 ```
@@ -118,6 +148,4 @@ calls return `-1` / `supported` is false.
 dart run /path/to/klin/bin/klin.dart test gd32v_ble/
 ```
 
-## License
-
-MIT
+Device builds need the GigaDevice SDK include/link paths (see examples Makefiles).

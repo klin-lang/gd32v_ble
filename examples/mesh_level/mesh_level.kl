@@ -1,5 +1,5 @@
-// GD32VW553 BLE Mesh Gen Level + vendor via klin-lang/gd32v_ble @v0.12.0.
-// mesh_enable node includes OnOff + Level + vendor button (cid 0x05F1).
+// GD32VW553 BLE Mesh Gen Level + vendor via klin-lang/gd32v_ble @v0.15.0.
+// mesh_enable node includes OnOff + Level + vendor button (0x0000) + vendor byte (0x0001).
 //   make emit KLIN=/path/to/klin/bin/klin.dart
 import "../../gd32v_ble" ble
 
@@ -19,6 +19,9 @@ fn main() {
         }
         if ble.mesh_vnd_changed() {
             let _v = ble.mesh_vnd()
+        }
+        if ble.mesh_vnd_byte_changed() {
+            let _b = ble.mesh_vnd_byte()
         }
         if ble.mesh_onoff_changed() {
             let _o = ble.mesh_onoff()

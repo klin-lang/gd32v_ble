@@ -89,3 +89,49 @@ fn test_oob_input_begin_display() {
     testing.assert(mesh_cdb_count() >= 2)
     testing.assert_eq_i32(stop(), 0)
 }
+
+fn test_oob_output_string_begin_inject() {
+    let mut busy: i32
+
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(mesh_provisioner_enable(), 0)
+    testing.assert_eq_i32(mesh_oob_auth_set(4), 0)
+    testing.assert_eq_i32(mesh_prov_adv_begin(0, 2), 0)
+    testing.assert_eq_i32(mesh_oob_action(), 4)
+    testing.assert_eq_i32(mesh_oob_input_string("AB12"), 0)
+    busy = 0
+    if mesh_prov_busy() {
+        busy = 1
+    }
+    testing.assert_eq_i32(busy, 0)
+    testing.assert(mesh_cdb_count() >= 2)
+    testing.assert_eq_i32(stop(), 0)
+}
+
+fn test_oob_input_string_begin_display() {
+    let mut buf: [17]u8
+    let mut n: i32
+    let mut busy: i32
+
+    testing.assert_eq_i32(init(), 0)
+    testing.assert_eq_i32(mesh_provisioner_enable(), 0)
+    testing.assert_eq_i32(mesh_oob_auth_set(5), 0)
+    testing.assert_eq_i32(mesh_prov_adv_begin(0, 2), 0)
+    testing.assert_eq_i32(mesh_oob_action(), 3)
+    n = mesh_oob_string(cast(*mut u8, &buf[0]), 17)
+    testing.assert_eq_i32(n, 4)
+    testing.assert(buf[0] == 65)
+    testing.assert(buf[1] == 66)
+    busy = 0
+    if mesh_prov_busy() {
+        busy = 1
+    }
+    testing.assert_eq_i32(busy, 1)
+    busy = 0
+    if mesh_prov_busy() {
+        busy = 1
+    }
+    testing.assert_eq_i32(busy, 0)
+    testing.assert(mesh_cdb_count() >= 2)
+    testing.assert_eq_i32(stop(), 0)
+}

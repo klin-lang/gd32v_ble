@@ -17,6 +17,7 @@
 /// Mesh Level + vendor (`@v0.12.0`): `mesh_level*` + `mesh_vnd*` on the Gen OnOff node composition.
 /// Mesh Friend/LPN (`@v0.13.0`): `mesh_lpn_*` / `mesh_friend_*` (needs SDK LOW_POWER / FRIEND).
 /// Mesh interactive OOB (`@v0.14.0`): `mesh_oob_auth_*` / `mesh_prov_*_begin` + poll.
+/// Mesh extras (`@v0.15.0`): string OOB, friendship param readouts, vendor byte model.
 /// Central / GATT client / bonding need an SDK build with those roles (e.g. msdk_ffd).
 module gd32v_ble
 
@@ -246,6 +247,15 @@ fn klin_gd32v_ble_mesh_vnd_set(state: i32): i32
 @[cimport, codename("klin_gd32v_ble_mesh_vnd_changed")]
 fn klin_gd32v_ble_mesh_vnd_changed(): i32
 
+@[cimport, codename("klin_gd32v_ble_mesh_vnd_byte")]
+fn klin_gd32v_ble_mesh_vnd_byte(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_vnd_byte_set")]
+fn klin_gd32v_ble_mesh_vnd_byte_set(value: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_vnd_byte_changed")]
+fn klin_gd32v_ble_mesh_vnd_byte_changed(): i32
+
 @[cimport, codename("klin_gd32v_ble_mesh_oob_number")]
 fn klin_gd32v_ble_mesh_oob_number(): i32
 
@@ -263,6 +273,12 @@ fn klin_gd32v_ble_mesh_oob_action(): i32
 
 @[cimport, codename("klin_gd32v_ble_mesh_oob_input_number")]
 fn klin_gd32v_ble_mesh_oob_input_number(number: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_oob_string")]
+fn klin_gd32v_ble_mesh_oob_string(out: *mut u8, max_len: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_oob_input_string")]
+fn klin_gd32v_ble_mesh_oob_input_string(str: str): i32
 
 @[cimport, codename("klin_gd32v_ble_mesh_oob_changed")]
 fn klin_gd32v_ble_mesh_oob_changed(): i32
@@ -330,6 +346,12 @@ fn klin_gd32v_ble_mesh_lpn_friend_addr(): i32
 @[cimport, codename("klin_gd32v_ble_mesh_lpn_changed")]
 fn klin_gd32v_ble_mesh_lpn_changed(): i32
 
+@[cimport, codename("klin_gd32v_ble_mesh_lpn_queue_size")]
+fn klin_gd32v_ble_mesh_lpn_queue_size(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_lpn_recv_window")]
+fn klin_gd32v_ble_mesh_lpn_recv_window(): i32
+
 @[cimport, codename("klin_gd32v_ble_mesh_friend_established")]
 fn klin_gd32v_ble_mesh_friend_established(): i32
 
@@ -341,6 +363,12 @@ fn klin_gd32v_ble_mesh_friend_terminate(lpn_addr: i32): i32
 
 @[cimport, codename("klin_gd32v_ble_mesh_friend_changed")]
 fn klin_gd32v_ble_mesh_friend_changed(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_friend_recv_delay")]
+fn klin_gd32v_ble_mesh_friend_recv_delay(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_friend_poll_timeout")]
+fn klin_gd32v_ble_mesh_friend_poll_timeout(): i32
 
 /// SDK / glue success (0).
 pub fn err_ok(): i32 {
@@ -694,11 +722,24 @@ pub fn mesh_vnd_changed(): bool {
     return klin_gd32v_ble_mesh_vnd_changed() != 0
 }
 
+/// Vendor byte (model 0x0001). Requires `mesh_enable`. Value must be 0..=255.
+pub fn mesh_vnd_byte(): i32 {
+    return klin_gd32v_ble_mesh_vnd_byte()
+}
+
+pub fn mesh_vnd_byte_set(value: i32): i32 {
+    return klin_gd32v_ble_mesh_vnd_byte_set(value)
+}
+
+pub fn mesh_vnd_byte_changed(): bool {
+    return klin_gd32v_ble_mesh_vnd_byte_changed() != 0
+}
+
 pub fn mesh_oob_number(): i32 {
     return klin_gd32v_ble_mesh_oob_number()
 }
 
-/// 0=none, 1=output (device displays), 2=input (device enters), 3=static.
+/// 0=none, 1=out num, 2=in num, 3=static, 4=out string, 5=in string.
 pub fn mesh_oob_auth_set(mode: i32): i32 {
     return klin_gd32v_ble_mesh_oob_auth_set(mode)
 }
@@ -712,13 +753,22 @@ pub fn mesh_oob_static_set(data: *u8, len: i32): i32 {
     return klin_gd32v_ble_mesh_oob_static_set(data, len)
 }
 
-/// 0 idle / 1 display `mesh_oob_number` / 2 enter via `mesh_oob_input_number`.
+/// 0 idle / 1 display number / 2 enter number / 3 display string / 4 enter string.
 pub fn mesh_oob_action(): i32 {
     return klin_gd32v_ble_mesh_oob_action()
 }
 
 pub fn mesh_oob_input_number(number: i32): i32 {
     return klin_gd32v_ble_mesh_oob_input_number(number)
+}
+
+/// Copy OOB display string into `out` (NUL-terminated). Returns length without NUL.
+pub fn mesh_oob_string(out: *mut u8, max_len: i32): i32 {
+    return klin_gd32v_ble_mesh_oob_string(out, max_len)
+}
+
+pub fn mesh_oob_input_string(str: str): i32 {
+    return klin_gd32v_ble_mesh_oob_input_string(str)
 }
 
 pub fn mesh_oob_changed(): bool {
@@ -822,6 +872,16 @@ pub fn mesh_lpn_changed(): bool {
     return klin_gd32v_ble_mesh_lpn_changed() != 0
 }
 
+/// Friend queue size after LPN friendship established (0 if unknown).
+pub fn mesh_lpn_queue_size(): i32 {
+    return klin_gd32v_ble_mesh_lpn_queue_size()
+}
+
+/// ReceiveWindow (ms) after LPN friendship established (0 if unknown).
+pub fn mesh_lpn_recv_window(): i32 {
+    return klin_gd32v_ble_mesh_lpn_recv_window()
+}
+
 pub fn mesh_friend_established(): bool {
     return klin_gd32v_ble_mesh_friend_established() != 0
 }
@@ -836,4 +896,14 @@ pub fn mesh_friend_terminate(lpn_addr: i32): i32 {
 
 pub fn mesh_friend_changed(): bool {
     return klin_gd32v_ble_mesh_friend_changed() != 0
+}
+
+/// ReceiveDelay (ms) after Friend established (0 if unknown).
+pub fn mesh_friend_recv_delay(): i32 {
+    return klin_gd32v_ble_mesh_friend_recv_delay()
+}
+
+/// PollTimeout (100 ms units) after Friend established (0 if unknown).
+pub fn mesh_friend_poll_timeout(): i32 {
+    return klin_gd32v_ble_mesh_friend_poll_timeout()
 }

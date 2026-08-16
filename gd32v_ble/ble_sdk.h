@@ -204,21 +204,31 @@ int klin_gd32v_ble_mesh_level_changed(void);
 int klin_gd32v_ble_mesh_vnd(void);
 int klin_gd32v_ble_mesh_vnd_set(int state);
 int klin_gd32v_ble_mesh_vnd_changed(void);
+/** Vendor byte model 0x0001: SET opcode 0x10 (cid 0x05F1). Value 0..=255. */
+int klin_gd32v_ble_mesh_vnd_byte(void);
+int klin_gd32v_ble_mesh_vnd_byte_set(int value);
+int klin_gd32v_ble_mesh_vnd_byte_changed(void);
 /** Last OOB display number from provisioning, or 0. */
 int klin_gd32v_ble_mesh_oob_number(void);
 /**
- * Provisioner auth method for the next remote provision:
- * 0=none (default), 1=output (device DISPLAY_NUMBER), 2=input (device ENTER_NUMBER),
- * 3=static (needs `mesh_oob_static_set` first).
+ * Provisioner auth for the next remote provision:
+ * 0=none, 1=out num, 2=in num, 3=static, 4=out string, 5=in string.
  */
 int klin_gd32v_ble_mesh_oob_auth_set(int mode);
 int klin_gd32v_ble_mesh_oob_auth(void);
 /** Static OOB bytes (1..=16). Call before `mesh_enable` (node) or auth_set(3). */
 int klin_gd32v_ble_mesh_oob_static_set(const unsigned char *data, int len);
-/** 0 idle / 1 display `mesh_oob_number` / 2 enter via `mesh_oob_input_number`. */
+/**
+ * 0 idle / 1 display number / 2 enter number /
+ * 3 display string (`mesh_oob_string`) / 4 enter string (`mesh_oob_input_string`).
+ */
 int klin_gd32v_ble_mesh_oob_action(void);
 /** Inject OOB number (`bt_mesh_input_number`). Requires action==2. */
 int klin_gd32v_ble_mesh_oob_input_number(int number);
+/** Copy OOB display string (NUL-terminated). Returns length without NUL, or -1. */
+int klin_gd32v_ble_mesh_oob_string(char *out, int max_len);
+/** Inject OOB string (`bt_mesh_input_string`). Requires action==4. */
+int klin_gd32v_ble_mesh_oob_input_string(const char *str);
 /** Poll-and-clear: OOB action changed. */
 int klin_gd32v_ble_mesh_oob_changed(void);
 /** Reset mesh node (leave network); re-enables provisioning bearers. */
@@ -242,6 +252,9 @@ int klin_gd32v_ble_mesh_lpn_established(void);
 int klin_gd32v_ble_mesh_lpn_friend_addr(void);
 /** Poll-and-clear: LPN friendship established/terminated. */
 int klin_gd32v_ble_mesh_lpn_changed(void);
+/** After LPN friendship: Friend queue size / ReceiveWindow (ms). 0 if unknown. */
+int klin_gd32v_ble_mesh_lpn_queue_size(void);
+int klin_gd32v_ble_mesh_lpn_recv_window(void);
 
 int klin_gd32v_ble_mesh_friend_established(void);
 /** LPN address while Friend friendship is up, else 0. */
@@ -250,6 +263,9 @@ int klin_gd32v_ble_mesh_friend_lpn_addr(void);
 int klin_gd32v_ble_mesh_friend_terminate(int lpn_addr);
 /** Poll-and-clear: Friend friendship established/terminated. */
 int klin_gd32v_ble_mesh_friend_changed(void);
+/** After Friend established: ReceiveDelay (ms) / PollTimeout (100 ms units). 0 if unknown. */
+int klin_gd32v_ble_mesh_friend_recv_delay(void);
+int klin_gd32v_ble_mesh_friend_poll_timeout(void);
 
 /**
  * Enable Mesh provisioner (CDB + self-provision at addr 1). After `init`.
