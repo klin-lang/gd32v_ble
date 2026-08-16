@@ -15,7 +15,7 @@ fn main() {
         return
     }
 
-    /* 1 = output OOB: device displays; we inject via mesh_oob_input_number. */
+    // 1 = output OOB: device displays; we inject via mesh_oob_input_number.
     e = ble.mesh_oob_auth_set(1)
     if e != ble.err_ok() {
         return
@@ -28,10 +28,11 @@ fn main() {
                 while ble.mesh_prov_busy() {
                     if ble.mesh_oob_changed() {
                         if ble.mesh_oob_action() == 2 {
-                            /* Replace with number read from the device display. */
-                            let _ = ble.mesh_oob_input_number(ble.mesh_oob_number())
+                            // Pass the number shown on the unprovisioned device.
+                            let _ = ble.mesh_oob_input_number(123456)
                         }
                         if ble.mesh_oob_action() == 1 {
+                            // Auth mode 2: show this number on the provisioner UI.
                             let _n = ble.mesh_oob_number()
                         }
                     }

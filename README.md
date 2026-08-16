@@ -58,11 +58,11 @@ import "github/klin-lang/gd32v_ble" ble
 fn main() {
     let mut e = ble.init()
     e = ble.mesh_provisioner_enable()
-    e = ble.mesh_oob_auth_set(1) /* output: device displays */
+    e = ble.mesh_oob_auth_set(1) // output: device displays → we enter (action 2)
     e = ble.mesh_prov_adv_begin(0, 2)
     while ble.mesh_prov_busy() {
         if ble.mesh_oob_action() == 2 {
-            e = ble.mesh_oob_input_number(/* number from device */)
+            e = ble.mesh_oob_input_number(123456) // number shown on the device
         }
     }
 }
