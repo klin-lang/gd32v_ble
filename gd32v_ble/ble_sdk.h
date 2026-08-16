@@ -7,6 +7,7 @@
  * `@v0.11.0` = … + Mesh provisioner (`mesh_provisioner_enable` + unprov table + prov_adv/gatt).
  * `@v0.12.0` = … + Mesh Gen Level + vendor button on the node (`mesh_level*` / `mesh_vnd*`).
  * `@v0.13.0` = … + Mesh Friend / LPN knobs (`mesh_lpn_*` / `mesh_friend_*`).
+ * `@v0.14.0` = … + Mesh interactive OOB (`mesh_oob_auth_*` / `mesh_prov_*_begin`).
  * Peripheral GATT: up to KLIN_GD32V_BLE_GATT_SVC_MAX services (1 chr each),
  * 16-bit or 128-bit UUIDs via gatt_uuid* / gatt_add_* before init.
  * Default single svc 0xFFF0 / chr 0xFFF1 when unset.
@@ -205,6 +206,21 @@ int klin_gd32v_ble_mesh_vnd_set(int state);
 int klin_gd32v_ble_mesh_vnd_changed(void);
 /** Last OOB display number from provisioning, or 0. */
 int klin_gd32v_ble_mesh_oob_number(void);
+/**
+ * Provisioner auth method for the next remote provision:
+ * 0=none (default), 1=output (device DISPLAY_NUMBER), 2=input (device ENTER_NUMBER),
+ * 3=static (needs `mesh_oob_static_set` first).
+ */
+int klin_gd32v_ble_mesh_oob_auth_set(int mode);
+int klin_gd32v_ble_mesh_oob_auth(void);
+/** Static OOB bytes (1..=16). Call before `mesh_enable` (node) or auth_set(3). */
+int klin_gd32v_ble_mesh_oob_static_set(const unsigned char *data, int len);
+/** 0 idle / 1 display `mesh_oob_number` / 2 enter via `mesh_oob_input_number`. */
+int klin_gd32v_ble_mesh_oob_action(void);
+/** Inject OOB number (`bt_mesh_input_number`). Requires action==2. */
+int klin_gd32v_ble_mesh_oob_input_number(int number);
+/** Poll-and-clear: OOB action changed. */
+int klin_gd32v_ble_mesh_oob_changed(void);
 /** Reset mesh node (leave network); re-enables provisioning bearers. */
 int klin_gd32v_ble_mesh_reset(void);
 
@@ -239,7 +255,8 @@ int klin_gd32v_ble_mesh_friend_changed(void);
  * Enable Mesh provisioner (CDB + self-provision at addr 1). After `init`.
  * Mutually exclusive with `mesh_enable`. Needs CONFIG_BT_MESH_PROVISIONER + CDB.
  * Unprov beacons fill a fixed table (max KLIN_GD32V_BLE_UNPROV_MAX).
- * Auth: auto `bt_mesh_auth_method_set_none` (no interactive OOB).
+ * Auth: `mesh_oob_auth_set` (default none). Interactive OOB needs `mesh_prov_*_begin`
+ * + poll `mesh_oob_action` / `mesh_prov_busy` (blocking `mesh_prov_*` is for none/static).
  */
 int klin_gd32v_ble_mesh_provisioner_enable(void);
 int klin_gd32v_ble_mesh_provisioner_enabled(void);
@@ -250,6 +267,11 @@ int klin_gd32v_ble_mesh_unprov_clear(void);
 int klin_gd32v_ble_mesh_prov_adv(int index, int addr, int timeout_ms);
 /** PB-GATT provision table entry. */
 int klin_gd32v_ble_mesh_prov_gatt(int index, int addr, int timeout_ms);
+/** Non-blocking PB-ADV start (interactive OOB). Poll `mesh_prov_busy` / `mesh_oob_*`. */
+int klin_gd32v_ble_mesh_prov_adv_begin(int index, int addr);
+int klin_gd32v_ble_mesh_prov_gatt_begin(int index, int addr);
+/** 1 while a begin'd provision is in flight. */
+int klin_gd32v_ble_mesh_prov_busy(void);
 int klin_gd32v_ble_mesh_cdb_count(void);
 /** Dense index into allocated CDB nodes; returns primary addr or 0. */
 int klin_gd32v_ble_mesh_cdb_addr(int index);

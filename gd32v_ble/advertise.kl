@@ -16,6 +16,7 @@
 /// Mesh provisioner (`@v0.11.0`): `mesh_provisioner_enable` + unprov table + `mesh_prov_adv`/`gatt`.
 /// Mesh Level + vendor (`@v0.12.0`): `mesh_level*` + `mesh_vnd*` on the Gen OnOff node composition.
 /// Mesh Friend/LPN (`@v0.13.0`): `mesh_lpn_*` / `mesh_friend_*` (needs SDK LOW_POWER / FRIEND).
+/// Mesh interactive OOB (`@v0.14.0`): `mesh_oob_auth_*` / `mesh_prov_*_begin` + poll.
 /// Central / GATT client / bonding need an SDK build with those roles (e.g. msdk_ffd).
 module gd32v_ble
 
@@ -248,6 +249,24 @@ fn klin_gd32v_ble_mesh_vnd_changed(): i32
 @[cimport, codename("klin_gd32v_ble_mesh_oob_number")]
 fn klin_gd32v_ble_mesh_oob_number(): i32
 
+@[cimport, codename("klin_gd32v_ble_mesh_oob_auth_set")]
+fn klin_gd32v_ble_mesh_oob_auth_set(mode: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_oob_auth")]
+fn klin_gd32v_ble_mesh_oob_auth(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_oob_static_set")]
+fn klin_gd32v_ble_mesh_oob_static_set(data: *u8, len: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_oob_action")]
+fn klin_gd32v_ble_mesh_oob_action(): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_oob_input_number")]
+fn klin_gd32v_ble_mesh_oob_input_number(number: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_oob_changed")]
+fn klin_gd32v_ble_mesh_oob_changed(): i32
+
 @[cimport, codename("klin_gd32v_ble_mesh_reset")]
 fn klin_gd32v_ble_mesh_reset(): i32
 
@@ -271,6 +290,15 @@ fn klin_gd32v_ble_mesh_prov_adv(index: i32, addr: i32, timeout_ms: i32): i32
 
 @[cimport, codename("klin_gd32v_ble_mesh_prov_gatt")]
 fn klin_gd32v_ble_mesh_prov_gatt(index: i32, addr: i32, timeout_ms: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_prov_adv_begin")]
+fn klin_gd32v_ble_mesh_prov_adv_begin(index: i32, addr: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_prov_gatt_begin")]
+fn klin_gd32v_ble_mesh_prov_gatt_begin(index: i32, addr: i32): i32
+
+@[cimport, codename("klin_gd32v_ble_mesh_prov_busy")]
+fn klin_gd32v_ble_mesh_prov_busy(): i32
 
 @[cimport, codename("klin_gd32v_ble_mesh_cdb_count")]
 fn klin_gd32v_ble_mesh_cdb_count(): i32
@@ -670,6 +698,33 @@ pub fn mesh_oob_number(): i32 {
     return klin_gd32v_ble_mesh_oob_number()
 }
 
+/// 0=none, 1=output (device displays), 2=input (device enters), 3=static.
+pub fn mesh_oob_auth_set(mode: i32): i32 {
+    return klin_gd32v_ble_mesh_oob_auth_set(mode)
+}
+
+pub fn mesh_oob_auth(): i32 {
+    return klin_gd32v_ble_mesh_oob_auth()
+}
+
+/// Static OOB bytes (1..=16). Before `mesh_enable` or `mesh_oob_auth_set(3)`.
+pub fn mesh_oob_static_set(data: *u8, len: i32): i32 {
+    return klin_gd32v_ble_mesh_oob_static_set(data, len)
+}
+
+/// 0 idle / 1 display `mesh_oob_number` / 2 enter via `mesh_oob_input_number`.
+pub fn mesh_oob_action(): i32 {
+    return klin_gd32v_ble_mesh_oob_action()
+}
+
+pub fn mesh_oob_input_number(number: i32): i32 {
+    return klin_gd32v_ble_mesh_oob_input_number(number)
+}
+
+pub fn mesh_oob_changed(): bool {
+    return klin_gd32v_ble_mesh_oob_changed() != 0
+}
+
 pub fn mesh_reset(): i32 {
     return klin_gd32v_ble_mesh_reset()
 }
@@ -704,6 +759,19 @@ pub fn mesh_prov_adv(index: i32, addr: i32, timeout_ms: i32): i32 {
 /// Provision via PB-GATT. `addr` 0 = auto.
 pub fn mesh_prov_gatt(index: i32, addr: i32, timeout_ms: i32): i32 {
     return klin_gd32v_ble_mesh_prov_gatt(index, addr, timeout_ms)
+}
+
+/// Non-blocking PB-ADV (interactive OOB). Poll `mesh_prov_busy` / `mesh_oob_*`.
+pub fn mesh_prov_adv_begin(index: i32, addr: i32): i32 {
+    return klin_gd32v_ble_mesh_prov_adv_begin(index, addr)
+}
+
+pub fn mesh_prov_gatt_begin(index: i32, addr: i32): i32 {
+    return klin_gd32v_ble_mesh_prov_gatt_begin(index, addr)
+}
+
+pub fn mesh_prov_busy(): bool {
+    return klin_gd32v_ble_mesh_prov_busy() != 0
 }
 
 pub fn mesh_cdb_count(): i32 {

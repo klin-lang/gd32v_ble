@@ -1,0 +1,48 @@
+// GD32VW553 BLE Mesh interactive OOB via klin-lang/gd32v_ble @v0.14.0.
+// Provisioner: mesh_oob_auth_set(1=output) + mesh_prov_adv_begin + poll.
+// Needs SDK mesh + PROVISIONER/CDB + BLE_MAX.
+//   make emit KLIN=/path/to/klin/bin/klin.dart
+import "../../gd32v_ble" ble
+
+fn main() {
+    let mut e = ble.init()
+    if e != ble.err_ok() {
+        return
+    }
+
+    e = ble.mesh_provisioner_enable()
+    if e != ble.err_ok() {
+        return
+    }
+
+    /* 1 = output OOB: device displays; we inject via mesh_oob_input_number. */
+    e = ble.mesh_oob_auth_set(1)
+    if e != ble.err_ok() {
+        return
+    }
+
+    while true {
+        if ble.mesh_unprov_count() > 0 {
+            e = ble.mesh_prov_adv_begin(0, 2)
+            if e == ble.err_ok() {
+                while ble.mesh_prov_busy() {
+                    if ble.mesh_oob_changed() {
+                        if ble.mesh_oob_action() == 2 {
+                            /* Replace with number read from the device display. */
+                            let _ = ble.mesh_oob_input_number(ble.mesh_oob_number())
+                        }
+                        if ble.mesh_oob_action() == 1 {
+                            let _n = ble.mesh_oob_number()
+                        }
+                    }
+                }
+                let _c = ble.mesh_cdb_count()
+            }
+            let _ = ble.mesh_unprov_clear()
+        }
+        let mut i: i32 = 0
+        while i < 20000000 {
+            i = i + 1
+        }
+    }
+}

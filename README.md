@@ -3,7 +3,8 @@
 Thin **GigaDevice VW55x BLE** bindings for [Klin](https://github.com/klin-lang/klin)
 (**peripheral advertise** + **GATT server** + **central scan/connect** +
 **GATT client** + **Just Works bonding** + **custom UUID16/128** + **multi-service**
-+ **passkey/PIN** + **LE privacy / RPA** + **Mesh Gen OnOff** + **Mesh provisioner** + **Gen Level / vendor** + **Friend / LPN**).
++ **passkey/PIN** + **LE privacy / RPA** + **Mesh Gen OnOff** + **Mesh provisioner** +
+**Gen Level / vendor** + **Friend / LPN** + **interactive OOB**).
 
 The radio is in the **silicon**; this package does **not** belong in
 [`machine_gd32v`](https://github.com/klin-lang/machine_gd32v) (MMIO Pin…Adc).
@@ -23,21 +24,22 @@ not hidden Klin allocation.
 Wi‑Fi is [`gd32v_wifi`](https://github.com/klin-lang/gd32v_wifi). Do **not**
 put BLE in a board pack.
 
-## Status (`@v0.13.0`)
+## Status (`@v0.14.0`)
 
 | API | Notes |
 |---|---|
+| `mesh_oob_auth_set` / `mesh_oob_auth` | 0=none, 1=output, 2=input, 3=static |
+| `mesh_oob_static_set` | Static OOB bytes (1..=16) |
+| `mesh_oob_action` / `mesh_oob_input_number` / `mesh_oob_changed` | Interactive poll + inject |
+| `mesh_prov_adv_begin` / `mesh_prov_gatt_begin` / `mesh_prov_busy` | Non-blocking provision |
 | `mesh_lpn_*` / `mesh_friend_*` | LPN set/poll + Friend terminate; needs LOW_POWER / FRIEND |
-| `mesh_lpn_supported` / `mesh_friend_supported` | Compile-time feature probes |
 | `mesh_provisioner_enable` | CDB + self-provision (addr 1); exclusive with `mesh_enable` |
-| `mesh_unprov_*` / `mesh_prov_adv` / `mesh_prov_gatt` | Unprov UUID table + PB-ADV/GATT |
-| `mesh_cdb_count` / `mesh_cdb_addr` | Provisioned CDB nodes |
+| `mesh_unprov_*` / `mesh_prov_adv` / `mesh_prov_gatt` | Unprov UUID table + blocking PB-ADV/GATT |
 | `mesh_level*` / `mesh_vnd*` | Gen Level + vendor button on `mesh_enable` node |
-| `mesh_enable` / `mesh_onoff*` / … | Prior Gen OnOff **node** |
 | Prior APIs | privacy / GATT / bond / UUID / scan / … |
 | `err_ok` | 0 |
 
-`version()` → `13`.
+`version()` → `14`.
 
 Host `klin test` uses stubs when `ble_init.h` is not on the include path.
 
@@ -45,7 +47,30 @@ Host `klin test` uses stubs when `ble_init.h` is not on the include path.
 **Mesh provisioner** also needs `CONFIG_BT_MESH_PROVISIONER` + `CONFIG_BT_MESH_CDB`
 (like SDK `provisioner` example). Without those, `mesh_provisioner_enable` → `-1`.
 
-Auth during remote provision: auto `bt_mesh_auth_method_set_none` (no interactive OOB).
+Default auth is **none**. Interactive OOB uses `mesh_oob_auth_set` +
+`mesh_prov_*_begin` (blocking `mesh_prov_adv`/`gatt` stay for none/static).
+
+## Usage (interactive OOB)
+
+```klin
+import "github/klin-lang/gd32v_ble" ble
+
+fn main() {
+    let mut e = ble.init()
+    e = ble.mesh_provisioner_enable()
+    e = ble.mesh_oob_auth_set(1) /* output: device displays */
+    e = ble.mesh_prov_adv_begin(0, 2)
+    while ble.mesh_prov_busy() {
+        if ble.mesh_oob_action() == 2 {
+            e = ble.mesh_oob_input_number(/* number from device */)
+        }
+    }
+}
+```
+
+```sh
+klin get github/klin-lang/gd32v_ble@v0.14.0
+```
 
 ## Usage (Mesh provisioner)
 
@@ -62,24 +87,6 @@ fn main() {
 }
 ```
 
-```sh
-klin get github/klin-lang/gd32v_ble@v0.13.0
-```
-
-## Usage (Level + vendor on node)
-
-```klin
-import "github/klin-lang/gd32v_ble" ble
-
-fn main() {
-    let mut e = ble.init()
-    e = ble.mesh_enable()
-    e = ble.mesh_level_set(1000)
-    e = ble.mesh_vnd_set(1) /* 0=released 1=pressed */
-}
-```
-
-
 ## Usage (Friend / LPN)
 
 ```klin
@@ -91,12 +98,7 @@ fn main() {
     if ble.mesh_lpn_supported() {
         e = ble.mesh_lpn_set(1)
     }
-    // Friend: mesh_friend_established / mesh_friend_terminate(lpn_addr)
 }
-```
-
-```sh
-klin get github/klin-lang/gd32v_ble@v0.13.0
 ```
 
 Without `CONFIG_BT_MESH_LOW_POWER` / `CONFIG_BT_MESH_FRIEND`, the matching
@@ -107,6 +109,7 @@ calls return `-1` / `supported` is false.
 - `mesh_enable` and `mesh_provisioner_enable` are mutually exclusive.
 - Unprov table max **8** (no glue malloc).
 - Default net/dev keys match SDK provisioner demo (fixed 16-byte constants).
+- Interactive OOB: use `mesh_prov_*_begin` + poll; no hidden callbacks into Klin.
 - No Klin GC / hidden heap. Errors are `i32` (0 = OK, `-1` = fail).
 
 ## Tests

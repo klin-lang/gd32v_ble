@@ -2,8 +2,8 @@ module gd32v_ble
 
 import testing
 
-fn test_version_is_thirteen() {
-    testing.assert_eq_i32(version(), 13)
+fn test_version_is_fourteen() {
+    testing.assert_eq_i32(version(), 14)
 }
 
 fn test_err_ok_is_zero() {
